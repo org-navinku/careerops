@@ -910,7 +910,7 @@ function renderResumePdf(rawText, atsResult){
   let y = margin;
 
   function ensureSpace(needed){
-    if(y + needed > pageHeight - margin - 20){ doc.addPage(); y = margin; }
+    if(y + needed > pageHeight - margin - 10){ doc.addPage(); y = margin; }
   }
 
   // ---- CV Content ----
@@ -919,8 +919,10 @@ function renderResumePdf(rawText, atsResult){
   let contactLineRendered = false;
   let afterHeader = false; // track if we just rendered a section header
 
-  lines.forEach((rawLine)=>{
+  lines.forEach((rawLine, lineIndex)=>{
     const line = rawLine.trim();
+    const isLastLine = lineIndex === lines.length - 1;
+
     if(line === ''){
       if(y > margin + 40 && !afterHeader) y += 4;
       afterHeader = false;
@@ -943,45 +945,45 @@ function renderResumePdf(rawText, atsResult){
     }
 
     // Contact line detection — email or phone, short line, centered
-    if(!contactLineRendered && sawName && line.length < 150 &&
+    if(!contactLineRendered && sawName && line.length < 200 &&
        (/\S+@\S+\.\S+/.test(line) || /\+?\d[\d\s\-()]{6,}/.test(line))){
-      ensureSpace(14);
+      ensureSpace(12);
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9);
+      doc.setFontSize(8.5);
       doc.setTextColor(80, 80, 80);
       const contactText = line.replace(/\*\*/g, '');
       const contactWrapped = doc.splitTextToSize(contactText, usableWidth - 40);
       contactWrapped.forEach((cl) => {
         doc.text(cl, pageWidth / 2, y, { align: 'center' });
-        y += 11;
+        y += 10;
       });
       contactLineRendered = true;
       // Subtle divider below contact
-      y += 6;
+      y += 4;
       doc.setDrawColor(200, 200, 200);
       doc.setLineWidth(0.5);
       doc.line(margin + 40, y, pageWidth - margin - 40, y);
-      y += 10;
+      y += 8;
       return;
     }
 
     // H2 -> Section Header (bold, dark, with full-width underline)
     if(/^##\s+/.test(line)){
       const content = line.replace(/^##\s+/, '').replace(/\*\*/g, '').toUpperCase();
-      ensureSpace(24);
-      y += 8; // space before section
+      ensureSpace(20);
+      y += 6; // space before section (reduced from 8)
 
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10.5);
+      doc.setFontSize(10);
       doc.setTextColor(30, 60, 55);
       doc.text(content, margin, y);
 
       // Full-width underline
       doc.setDrawColor(30, 60, 55);
-      doc.setLineWidth(0.6);
-      doc.line(margin, y + 4, pageWidth - margin, y + 4);
+      doc.setLineWidth(0.5);
+      doc.line(margin, y + 3, pageWidth - margin, y + 3);
 
-      y += 16;
+      y += 13; // reduced from 16
       afterHeader = true;
       return;
     }
@@ -1021,10 +1023,10 @@ function renderResumePdf(rawText, atsResult){
     // Bullet points
     if(/^[-*]\s+/.test(line)){
       const content = line.replace(/^[-*]\s+/, '').replace(/\*\*/g, '');
-      ensureSpace(12);
+      ensureSpace(10);
 
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9.5);
+      doc.setFontSize(9);
       doc.setTextColor(35, 35, 35);
 
       // Bullet character
@@ -1032,10 +1034,10 @@ function renderResumePdf(rawText, atsResult){
 
       const bulletWrapped = doc.splitTextToSize(content, usableWidth - 22);
       bulletWrapped.forEach((bullet, idx) => {
-        if(idx > 0){ y += 11; ensureSpace(11); }
+        if(idx > 0){ y += 10; ensureSpace(10); }
         doc.text(bullet, margin + 18, y);
       });
-      y += 12;
+      y += 10;
       return;
     }
 
@@ -1061,14 +1063,14 @@ function renderResumePdf(rawText, atsResult){
 
     // Plain text / paragraphs — properly wrapped
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9.5);
+    doc.setFontSize(9);
     doc.setTextColor(40, 40, 40);
     const plainText = line.replace(/\*\*/g, '');
     const wrappedLines = doc.splitTextToSize(plainText, usableWidth);
     wrappedLines.forEach((wl) => {
-      ensureSpace(12);
+      ensureSpace(10);
       doc.text(wl, margin, y);
-      y += 11;
+      y += 10;
     });
   });
 
