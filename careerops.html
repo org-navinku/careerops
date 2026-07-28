@@ -476,7 +476,7 @@ async function handleCvFile(file){
 async function extractDocxText(file){
   const formData = new FormData();
   formData.append('file', file);
-  const response = await fetch('http://localhost:5000/api/extract-docx', {
+  const response = await fetch('http://localhost:5001/api/extract-docx', {
     method: 'POST',
     body: formData
   });
@@ -568,7 +568,7 @@ Respond with ONLY valid JSON:
   const userMsg = `BASE CV:\n${baseCv}\n\n---\n\nJOB DESCRIPTION:\n${jd}`;
 
   try{
-    const response = await fetch("http://localhost:5000/api/generate", {
+    const response = await fetch("http://localhost:5001/api/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -685,7 +685,7 @@ ${baseCv}
 Respond with ONLY valid JSON: {"tailored_cv": "the complete revised CV in markdown"}`;
 
       try{
-        const r2 = await fetch("http://localhost:5000/api/generate", {
+        const r2 = await fetch("http://localhost:5001/api/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

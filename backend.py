@@ -140,6 +140,8 @@ def generate():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
+    port = int(os.environ.get('FLASK_PORT', 5000))
+
     print(f"🔍 Looking for Ollama at {OLLAMA_BASE}...")
     if not check_ollama():
         print("❌ Ollama is not running!")
@@ -153,7 +155,7 @@ if __name__ == '__main__':
 
     print("✅ Ollama connected!")
     print(f"📦 Using model: {MODEL}")
-    print("🚀 Backend running on http://localhost:5000")
-    print("📄 Frontend: http://localhost:8000/careerops.html")
-    print("✓ Health check: http://localhost:5000/api/health")
-    app.run(port=5000, debug=False)
+    print(f"🚀 Backend running on http://localhost:{port}")
+    print(f"📄 Frontend: http://localhost:8000/careerops.html")
+    print(f"✓ Health check: http://localhost:{port}/api/health")
+    app.run(port=port, debug=False)
