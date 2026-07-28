@@ -213,7 +213,7 @@
         <div class="result-content editable" id="rtContent" contenteditable="true"></div>
         <div class="skill-tags" id="skillTags"></div>
         <div class="btn-row" style="margin-top:16px;">
-          <button class="btn" id="downloadCvBtn">Download CV (PDF)</button>
+          <button class="btn" id="downloadCvBtn">Download CV (DOCX)</button>
           <button class="btn" id="downloadCoverBtn">Download Cover Letter (PDF)</button>
           <button class="btn primary" id="logApplicationBtn">Log this application →</button>
         </div>
@@ -416,18 +416,32 @@ if(window['pdfjsLib']){
 async function extractPdfText(file){
   const buf = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-  let text = '';
+  let allPages = [];
   for(let i=1; i<=pdf.numPages; i++){
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    let lastY = null;
+    // Group items into lines by Y position (tolerance 4pt)
+    const lineMap = new Map();
     content.items.forEach(item=>{
-      if(lastY !== null && Math.abs(item.transform[5] - lastY) > 2) text += '\n';
-      text += item.str + ' ';
-      lastY = item.transform[5];
+      if(!item.str.trim()) return;
+      const y = Math.round(item.transform[5] / 4) * 4;
+      if(!lineMap.has(y)) lineMap.set(y, []);
+      lineMap.get(y).push({ x: item.transform[4], str: item.str });
     });
-    text += '\n\n';
+    // Sort lines top-to-bottom (descending Y in PDF coords)
+    const sortedYs = Array.from(lineMap.keys()).sort((a,b) => b - a);
+    sortedYs.forEach(y => {
+      // Sort items left-to-right within each line
+      const items = lineMap.get(y).sort((a,b) => a.x - b.x);
+      const lineStr = items.map(it => it.str).join(' ').trim();
+      if(lineStr) allPages.push(lineStr);
+    });
+    allPages.push('');
   }
+  let text = allPages.join('\n');
+  // Merge orphaned bullet chars with the next text line
+  text = text.replace(/^([•\-\*])\s*\n+([^•\-\*\n])/gm, '$1 $2');
+  // Clean up
   return text.replace(/[ \t]+\n/g,'\n').replace(/\n{3,}/g,'\n\n').trim();
 }
 
@@ -506,6 +520,15 @@ uploadZone.addEventListener('drop', (e)=>{
 document.getElementById('saveCvBtn').addEventListener('click', async ()=>{
   const val = document.getElementById('baseCvInput').value;
   const statusEl = document.getElementById('cvSaveStatus');
+  // Warn if CV looks truncated / placeholder
+  const truncationMarkers = /\.{3}\s*complete all roles|\[your name\]|\[name\]|placeholder|complete all roles as per/i;
+  if(truncationMarkers.test(val)){
+    toast('⚠️ Your CV appears incomplete or contains placeholder text. Fill in all roles before saving.', true);
+    statusEl.textContent = '⚠️ incomplete CV — fill in all roles';
+    statusEl.style.color = 'var(--red)';
+    setTimeout(()=>{ statusEl.textContent = ''; statusEl.style.color = ''; }, 5000);
+    return;
+  }
   statusEl.textContent = 'saving...';
   const result = await sset('base-cv', val);
   if(result){
@@ -526,6 +549,262 @@ document.getElementById('saveCvBtn').addEventListener('click', async ()=>{
 // ---------- DEPLOY VIEW: generation ----------
 document.getElementById('generateBtn').addEventListener('click', generatePackage);
 
+// ---------- Parse base CV into structured data (no LLM) ----------
+function parseBaseCv(raw){
+  const lines = raw.split('\n').map(l => l.trim()).filter(l => l && l !== '\f');
+  const parsed = { name:'', contact:'', summary:'', skills:[], roles:[], education:[], certifications:[], community:[] };
+
+  // --- contact: collect email, phone, location, linkedin, website (scan whole doc)
+  const contactParts = [];
+  const contactSet = new Set();
+  const addContact = v => { if(!contactSet.has(v)){ contactSet.add(v); contactParts.push(v); } };
+  // Only collect contact from lines BEFORE the first section header
+  const firstSectionIdx = lines.findIndex(l => /^(SUMMARY|CERTIFICATIONS|PROFESSIONAL EXPERIENCE|EDUCATION|KEY SKILLS|VOLUNTEER|COMMUNITY)/i.test(l));
+  const preambleLines = firstSectionIdx >= 0 ? lines.slice(0, firstSectionIdx) : lines.slice(0, 15);
+  for(const l of preambleLines){
+    // Split pipe-separated lines and check each token individually
+    const tokens = l.split('|').map(t => t.trim()).filter(Boolean);
+    for(const t of tokens){
+      if(/\S+@\S+\.\S+/.test(t)) addContact(t);
+      else if(/^\+?\d[\d\s\-()]{6,}/.test(t)) addContact(t);
+      else if(/linkedin\.com/i.test(t)) addContact(t);
+      else if(/^https?:\/\//i.test(t)) addContact(t.replace(/\s+\d{4}\s*$/, '').trim()); // strip trailing year from URLs
+      else if(/,\s*(IN|UK|US|Remote)$/i.test(t)) addContact(t);
+      // skip tagline/title tokens (e.g. "Ex-SDE, AWS Since", "Staff Engineer")
+    }
+  }
+  parsed.contact = contactParts.join(' | ');
+
+  // --- name: first preamble line that is 2+ words, no digits, no URL, no @, not a location
+  for(const l of preambleLines){
+    if(/\d/.test(l) || /^https?:/i.test(l) || /^\+/.test(l) || l.includes('@')) continue;
+    if(/,\s*(IN|UK|US|Remote)$/i.test(l)) continue; // skip location lines
+    const words = l.split(/\s+/).filter(Boolean);
+    if(words.length >= 2 && words.length <= 6 && l.length < 60){
+      parsed.name = l.split('|')[0].trim();
+      break;
+    }
+  }
+  // Fallback: check first few lines of SUMMARY section (PDF column layout may put name there)
+  if(!parsed.name){
+    const summaryLines = (rawSections['SUMMARY'] || []).slice(0,4);
+    for(const l of summaryLines){
+      if(/\d/.test(l) || /^https?:/i.test(l) || /^\+/.test(l) || l.includes('@')) continue;
+      if(/,\s*(IN|UK|US|Remote)$/i.test(l)) continue;
+      if(/Staff|Platform|Engineer|Architect|Developer|Consultant|Manager/i.test(l)) continue;
+      const words = l.split(/\s+/).filter(Boolean);
+      if(words.length >= 2 && words.length <= 5 && l.length < 50){
+        parsed.name = l.split('|')[0].trim();
+        break;
+      }
+    }
+  }
+
+  // --- split into named sections by ALL-CAPS headers or known keywords
+  const sectionRe = /^(SUMMARY|CERTIFICATIONS|PROFESSIONAL EXPERIENCE|EDUCATION|KEY SKILLS|VOLUNTEER|COMMUNITY)/i;
+  const rawSections = {};
+  let curSection = 'PREAMBLE';
+  for(const l of lines){
+    const m = l.match(sectionRe);
+    if(m){ curSection = m[1].toUpperCase(); rawSections[curSection] = rawSections[curSection] || []; continue; }
+    if(!rawSections[curSection]) rawSections[curSection] = [];
+    rawSections[curSection].push(l);
+  }
+
+  // --- summary
+  parsed.summary = (rawSections['SUMMARY'] || []).filter(l =>
+    l !== parsed.name && !l.includes('|') && !/^Staff Platform Engineer/.test(l)
+  ).join(' ').trim();
+
+  // --- skills: lines from KEY SKILLS section
+  parsed.skills = (rawSections['KEY SKILLS'] || []).filter(l => l.length > 2);
+
+  // --- certifications: bullet chars are separate lines from text in this PDF layout
+  const certRaw = (rawSections['CERTIFICATIONS'] || []);
+  // Filter out standalone bullet chars and empty lines, keep actual cert text
+  parsed.certifications = certRaw
+    .filter(l => l.length > 4 && l !== '•' && l !== '-' && l !== '*')
+    .map(l => l.replace(/^[•\-\*]\s*/, '').trim())
+    .filter(l => l.length > 4);
+
+  // --- education: pair up dates + institution + degree
+  const eduLines = (rawSections['EDUCATION'] || []).filter(l => l.length > 1 && l !== '-');
+  // Collect all dates and all institution/degree names separately then zip
+  const eduDates = [];
+  const eduNames = [];
+  for(const l of eduLines){
+    if(/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[\s']/.test(l) || /^\d{4}/.test(l)) eduDates.push(l.replace(/-/g,'–').trim());
+    else eduNames.push(l);
+  }
+  // Zip: pair each institution+degree (2 lines each) with a date
+  for(let i=0; i<eduNames.length; i+=2){
+    const inst = eduNames[i] || '';
+    const deg = eduNames[i+1] || '';
+    const date = eduDates[i/2] || '';
+    const parts = [inst, deg].filter(Boolean).join(', ');
+    parsed.education.push(date ? parts + ' (' + date + ')' : parts);
+  }
+
+  // --- community
+  const commKey = Object.keys(rawSections).find(k => /VOLUNTEER|COMMUNITY/i.test(k));
+  parsed.community = commKey ? (rawSections[commKey] || []).filter(l => l.length > 2) : [];
+
+  // --- roles: parse PROFESSIONAL EXPERIENCE
+  const expLines = rawSections['PROFESSIONAL EXPERIENCE'] || [];
+  // Role boundary: a line that is a job title (not a bullet, not a date, not a company description)
+  // Strategy: collect lines, detect role blocks by title+company+date pattern
+  let role = null;
+  const flushRole = () => { if(role && role.title) parsed.roles.push(role); };
+  let i = 0;
+  while(i < expLines.length){
+    const l = expLines[i];
+    // Skip company description lines (long sentences with full stops)
+    if(l.length > 80 && /[A-Z].*\.$/.test(l)){ i++; continue; }
+    // Skip standalone bullet chars
+    if(l === '•' || l === '-' || l === '*'){ i++; continue; }
+    // Skip environment/technology lines
+    if(/^(Environment|Technology):/i.test(l)){ i++; continue; }
+    // Date line: standalone date like "Sep '22" or "Nov '15 Dec '19"
+    if(/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/.test(l) && l.length < 30){
+      if(role) role.dates = l.replace(/-/g,'–').replace(/\s+/g,' ').trim();
+      i++; continue;
+    }
+    // Standalone "-" separator
+    if(l === '-'){ i++; continue; }
+    // "Present" or "Remote" or location after a date
+    if(/^(Present|Remote|Hybrid|Gurugram|Delhi|Lucknow|New Delhi)/i.test(l) && l.length < 30){
+      if(role && !role.dates.includes('Present') && l === 'Present') role.dates += ' – Present';
+      i++; continue;
+    }
+    // Bullet point
+    if(/^[•\-\*]\s+/.test(l) || (role && role.title && /^[A-Z]/.test(l) && expLines[i-1] && expLines[i-1] === '•')){
+      if(role){
+        let bullet = l.replace(/^[•\-\*]\s*/,'').trim();
+        // Merge continuation lines (next line starts lowercase or is a continuation)
+        while(i+1 < expLines.length){
+          const next = expLines[i+1];
+          if(next === '•' || next === '-' || /^[•\-\*]\s+/.test(next)) break;
+          if(/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|Environment|Technology|Present|Remote|Hybrid)/i.test(next)) break;
+          if(next.length > 80 && /[A-Z].*\.$/.test(next)) break;
+          if(/^[A-Z][a-z]+ (Platform|Cloud|DevOps|Technical|Associate|Software|Senior)/.test(next)) break;
+          bullet += ' ' + next;
+          i++;
+        }
+        role.bullets.push(bullet);
+      }
+      i++; continue;
+    }
+    // Looks like a job title (short, title-case, no full stop, not a company-only line)
+    // Company lines tend to follow a title immediately — skip lines that are pure org names
+    const isCompanyOnly = /\b(Technologies|Consulting|Solutions|Pvt Ltd|Ltd|Inc|Corp|LLP|GmbH)\b/i.test(l);
+    // If this is a company-only line and we have an active role missing its company, assign it
+    if(isCompanyOnly && role && !role.company && l.length < 80){
+      role.company = l;
+      i++; continue;
+    }
+    if(!isCompanyOnly && l.length < 80 && !/\.$/.test(l) && /[A-Z]/.test(l[0])){
+      // Check if next non-empty line is a company name
+      const nextNonEmpty = expLines.slice(i+1).find(x => x.length > 1 && x !== '•');
+      if(nextNonEmpty && nextNonEmpty.length < 80 && !/^[•\-]/.test(nextNonEmpty)){
+        flushRole();
+        role = { title: l, company: '', dates: '', location: '', bullets: [] };
+        i++;
+        // Next line = company (even if it's a company-only line)
+        if(i < expLines.length && expLines[i].length < 80 && !/^[•\-]/.test(expLines[i]) && !/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/.test(expLines[i])){
+          role.company = expLines[i];
+          i++;
+        }
+        continue;
+      }
+    }
+    i++;
+  }
+  flushRole();
+  return parsed;
+}
+
+// ---------- Assemble final markdown from parsed structure + LLM rewrites ----------
+function assembleCvMarkdown(parsed, llmSummary, llmRoleBullets){
+  const lines = [];
+  lines.push('# ' + parsed.name);
+  if(parsed.contact) lines.push(parsed.contact);
+  lines.push('');
+
+  // Summary
+  lines.push('## SUMMARY');
+  lines.push(llmSummary || parsed.summary);
+  lines.push('');
+
+  // Key Skills
+  if(parsed.skills.length){
+    lines.push('## KEY SKILLS');
+    parsed.skills.forEach(s => lines.push('- ' + s.replace(/^[•\-\*]\s*/,'')));
+    lines.push('');
+  }
+
+  // Professional Experience
+  lines.push('## PROFESSIONAL EXPERIENCE');
+  parsed.roles.forEach((role, idx) => {
+    // Clean dates: strip month/year from "Present" end  e.g. "Sep '22 – Present" stays, but
+    // "Nov '15 Dec '19" → "Nov '15 – Dec '19", and bare "Present" stays as-is
+    let dates = (role.dates || '').trim();
+    // Normalise two adjacent month-year tokens with no separator → add –
+    dates = dates.replace(
+      /((Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s']*\d{2,4})\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s']*\d{2,4}|Present)/gi,
+      '$1 – $3'
+    );
+    // Remove any month/year that appears AFTER "Present" (e.g. "Present Dec '21" → "Present")
+    dates = dates.replace(/Present\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s']*\d{2,4}/gi, 'Present');
+    const dateStr = dates ? ' (' + dates + ')' : '';
+    // Title line: "Title | Company" on one line, date in parens — no " at " to avoid long overflow
+    const companyPart = role.company ? ' | ' + role.company : '';
+    const locationPart = role.location ? ', ' + role.location : '';
+    lines.push('### ' + role.title + companyPart + locationPart + dateStr);
+    const bullets = (llmRoleBullets && llmRoleBullets[idx]) ? llmRoleBullets[idx] : role.bullets;
+    bullets.forEach(b => lines.push('- ' + b));
+    lines.push('');
+  });
+
+  // Education
+  if(parsed.education.length){
+    lines.push('## EDUCATION');
+    parsed.education.forEach(e => lines.push('- ' + e));
+    lines.push('');
+  }
+
+  // Certifications
+  if(parsed.certifications.length){
+    lines.push('## CERTIFICATIONS');
+    parsed.certifications.forEach(c => lines.push('- ' + c));
+    lines.push('');
+  }
+
+  // Community
+  if(parsed.community.length){
+    lines.push('## VOLUNTEER & COMMUNITY CONTRIBUTIONS');
+    parsed.community.forEach(c => lines.push('- ' + c.replace(/^[•\-\*]\s*/,'')));
+    lines.push('');
+  }
+
+  return lines.join('\n').trim();
+}
+
+async function callLlm(userMsg, systemMsg, maxTokens){
+  const body = { model: 'claude-sonnet-4-6', max_tokens: maxTokens, user_message: userMsg };
+  if(systemMsg) body.system = systemMsg;
+  const r = await fetch('http://localhost:5001/api/generate', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  });
+  const d = await r.json();
+  const tb = (d.content || []).find(b => b.type === 'text');
+  if(!tb) throw new Error('No text response from model');
+  let clean = tb.text.trim().replace(/^```json/i,'').replace(/^```/,'').replace(/```$/,'').trim();
+  clean = clean.replace(/"((?:[^"\\]|\\.)*)"/g, (m, inner) => {
+    return '"' + inner.replace(/[\x00-\x1F\x7F]/g, ch => ({"\n":'\\n','\r':'\\r','\t':'\\t'}[ch]||'')) + '"';
+  });
+  return JSON.parse(clean);
+}
+
 async function generatePackage(){
   const jd = document.getElementById('jdInput').value.trim();
   if(!jd){ toast('Paste a job description first.', true); return; }
@@ -534,185 +813,79 @@ async function generatePackage(){
   const btn = document.getElementById('generateBtn');
   const statusEl = document.getElementById('genStatus');
   btn.disabled = true;
-  statusEl.innerHTML = '<span class="spinner" style="display:inline-block;vertical-align:middle;"></span> tailoring your profile...';
-
-  const systemPrompt = `You are a CV writer. Given a base CV and job description, produce a JSON application package.
-
-ABSOLUTE RULES FOR "tailored_cv":
-- NEVER add skills, technologies, or tools that are NOT mentioned in the base CV. Only use what the candidate actually lists.
-- NEVER fabricate, invent, or assume technologies. If PostgreSQL is not in the base CV, do NOT add it.
-- DO reorder and emphasize existing skills that match the JD.
-- DO reframe experience bullets to highlight JD-relevant aspects using ONLY real experience.
-
-MARKDOWN FORMAT:
-- # for name ONLY (line 1): # Name - Title
-- ## for ALL section headers
-- ### for job title lines: ### Title at Company (Date)
-- - for bullets
-
-SECTION ORDER: Summary, Skills, Professional Experience, Certifications
-- Summary: 2-3 sentences (paragraph, not bullets)
-- Skills: grouped by category, ONLY skills from the base CV
-- Experience: ALL roles from base CV with ### headers, 3-4 concise bullets each
-- Certifications: ALL certs from base CV
-
-CRITICAL:
-- Include ALL job roles from the base CV. Do not skip any.
-- Do not truncate or write "continued". Output the COMPLETE CV.
-- Do NOT include cover letter or email in this field.
-- Keep bullets concise (1-2 lines each) to fit all roles.
-
-Respond with ONLY valid JSON:
-{"company":"string","role":"string","tailored_cv":"complete markdown CV","cover_letter":"plain text under 250 words","email_draft":"under 100 words, first line Subject:","key_skills_matched":["5-8 phrases"]}`;
-
-  const userMsg = `BASE CV:\n${baseCv}\n\n---\n\nJOB DESCRIPTION:\n${jd}`;
+  statusEl.innerHTML = '<span class="spinner" style="display:inline-block;vertical-align:middle;"></span> parsing base profile...';
 
   try{
-    const response = await fetch("http://localhost:5001/api/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 8000,
-        system: systemPrompt,
-        user_message: userMsg
-      })
-    });
-    const data = await response.json();
-    const textBlock = (data.content || []).find(b => b.type === 'text');
-    if(!textBlock) throw new Error('No text response from model');
-    let clean = textBlock.text.trim().replace(/^```json/i,'').replace(/^```/,'').replace(/```$/,'').trim();
-    // Fix control characters inside JSON string values (not structural whitespace)
-    clean = clean.replace(/"((?:[^"\\]|\\.)*)"/g, (match, inner) => {
-      const fixed = inner.replace(/[\x00-\x1F\x7F]/g, (ch) => {
-        const esc = {'\n':'\\n','\r':'\\r','\t':'\\t'};
-        return esc[ch] || '';
-      });
-      return '"' + fixed + '"';
-    });
-    const parsed = JSON.parse(clean);
+    // Step 1: Parse base CV into structure — no LLM, 100% reliable
+    const parsed = parseBaseCv(baseCv);
+    if(!parsed.name){ toast('Could not detect name in base profile. Try re-saving it.', true); btn.disabled=false; return; }
+    if(!parsed.roles.length){ toast('Could not detect any job roles in base profile. Try re-saving it.', true); btn.disabled=false; return; }
 
-    // Post-process: fix common LLM output issues in the CV field
-    let cvText = parsed.tailored_cv || '';
-    // Remove email draft sections that may have leaked in
-    cvText = cvText.replace(/\n*(Email Draft|Email|Subject:)[\s\S]*$/i, '');
-    // Remove cover letter sections that may have leaked in
-    cvText = cvText.replace(/\n*(Cover Letter|Dear\s+(Hiring|Sir|Madam|Recruiting|HR))[\s\S]*$/i, '');
-    // Remove "Continued in next message" truncation artifacts
-    cvText = cvText.replace(/\n*\.{0,3}\s*\(Continued[^)]*\).*$/i, '');
-    cvText = cvText.replace(/\n*\.{3}\s*$/i, '');
-    // Fix # used for section headers (should be ##). Only the first # line should stay as #
-    let firstH1Seen = false;
-    cvText = cvText.split('\n').map(line => {
-      if(/^#\s+/.test(line) && !/^##/.test(line)){
-        if(!firstH1Seen){ firstH1Seen = true; return line; } // keep first # as name
-        return '#' + line; // convert subsequent # to ##
-      }
-      return line;
-    }).join('\n');
-    // Fix section ordering if out of order (Summary should come first after name)
-    // Detect if Certifications comes before Experience and reorder
-    const sections = [];
-    let currentSection = { header: '', lines: [] };
-    cvText.split('\n').forEach(line => {
-      if(/^##\s+/i.test(line)){
-        if(currentSection.header || currentSection.lines.length) sections.push(currentSection);
-        currentSection = { header: line, lines: [] };
-      } else {
-        currentSection.lines.push(line);
-      }
-    });
-    if(currentSection.header || currentSection.lines.length) sections.push(currentSection);
-    
-    // Separate the name/pre-section content from sections
-    const preSections = sections.filter(s => !s.header);
-    const namedSections = sections.filter(s => s.header);
-    
-    // Sort sections: Summary, Skills, Experience, Certifications/Education
-    const sectionOrder = { summary: 0, skills: 1, 'technical skills': 1, 'core skills': 1, 
-      'professional experience': 2, experience: 2, 'work experience': 2, 
-      certifications: 3, education: 4, projects: 5 };
-    namedSections.sort((a, b) => {
-      const aName = a.header.replace(/^##\s+/i, '').toLowerCase().trim();
-      const bName = b.header.replace(/^##\s+/i, '').toLowerCase().trim();
-      const aOrder = sectionOrder[aName] ?? 99;
-      const bOrder = sectionOrder[bName] ?? 99;
-      return aOrder - bOrder;
-    });
-    
-    cvText = [...preSections, ...namedSections]
-      .map(s => (s.header ? s.header + '\n' : '') + s.lines.join('\n'))
-      .join('\n').trim();
+    statusEl.innerHTML = '<span class="spinner" style="display:inline-block;vertical-align:middle;"></span> tailoring summary & bullets...';
 
-    currentPackage = {
-      company: parsed.company || '',
-      role: parsed.role || '',
-      jd,
-      tailoredCV: cvText,
-      coverLetter: parsed.cover_letter || '',
-      emailDraft: parsed.email_draft || '',
-      skills: parsed.key_skills_matched || []
-    };
+    // Step 2: Ask LLM ONLY to rewrite summary + bullets per role — small focused task
+    const rolesForLlm = parsed.roles.map((r,i) => ({
+      idx: i,
+      title: r.title,
+      company: r.company,
+      dates: r.dates,
+      bullets: r.bullets
+    }));
 
-    // ATS refinement loop — target 80+, up to 2 extra passes
-    let atsResult = computeATSScore(jd, currentPackage.tailoredCV);
-    let attempt = 0;
-    while(atsResult.score < 80 && attempt < 3){
-      attempt++;
-      statusEl.innerHTML = `<span class="spinner" style="display:inline-block;vertical-align:middle;"></span> optimizing for ATS match (pass ${attempt}/3, current score: ${atsResult.score})...`;
-      const revisePrompt = `A tailored CV currently scores ${atsResult.score}/100 on ATS keyword matching. Target is 80+.
+    const llmPrompt = `You are a CV writer. Tailor ONLY the summary and experience bullets to match the job description.
+Do NOT invent skills or tools not present in the original bullets.
+Do NOT change job titles, companies, or dates.
+Keep each bullet to 1-2 lines.
+
+ORIGINAL SUMMARY:
+${parsed.summary}
+
+ROLES (JSON):
+${JSON.stringify(rolesForLlm, null, 2)}
 
 JOB DESCRIPTION:
 ${jd}
 
-CURRENT CV:
-${currentPackage.tailoredCV}
+Respond with ONLY valid JSON:
+{"company":"hiring company name from JD","role":"job title from JD","summary":"tailored 2-3 sentence summary","roles":[{"idx":0,"bullets":["bullet1","bullet2"]},...],"cover_letter":"plain text under 250 words","email_draft":"under 100 words, first line Subject:","key_skills_matched":["5-8 phrases"]}`;
 
-MISSING KEYWORDS: ${atsResult.missing.join(', ')}
-
-RULES (STRICT):
-1. Only add keywords that genuinely exist in the BASE CV below. Do NOT invent or fabricate skills/tools.
-2. If a missing keyword exists in the base CV but was omitted from the tailored CV, add it back.
-3. If a missing keyword does NOT exist in the base CV, skip it entirely. Never fabricate.
-4. Reframe existing bullets to naturally mention applicable keywords already in the candidate's background.
-5. Keep ALL job roles from the base CV. Do not remove any.
-6. Keep markdown structure: # name, ## sections, ### job titles, - bullets.
-7. Keep bullets concise (1-2 lines). Include the COMPLETE CV, all roles.
-
-BASE CV (source of truth - ONLY use skills/tools mentioned here):
-${baseCv}
-
-Respond with ONLY valid JSON: {"tailored_cv": "the complete revised CV in markdown"}`;
-
-      try{
-        const r2 = await fetch("http://localhost:5001/api/generate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "claude-sonnet-4-6",
-            max_tokens: 6000,
-            user_message: revisePrompt
-          })
-        });
-        const d2 = await r2.json();
-        const tb2 = (d2.content || []).find(b => b.type === 'text');
-        if(!tb2) break;
-        let c2 = tb2.text.trim().replace(/^```json/i,'').replace(/^```/,'').replace(/```$/,'').trim();
-        // Fix control characters inside JSON string values
-        c2 = c2.replace(/"((?:[^"\\]|\\.)*)"/g, (match, inner) => {
-          const fixed = inner.replace(/[\x00-\x1F\x7F]/g, (ch) => {
-            const esc = {'\n':'\\n','\r':'\\r','\t':'\\t'};
-            return esc[ch] || '';
-          });
-          return '"' + fixed + '"';
-        });
-        const p2 = JSON.parse(c2);
-        if(p2.tailored_cv){
-          currentPackage.tailoredCV = p2.tailored_cv;
-          atsResult = computeATSScore(jd, currentPackage.tailoredCV);
-        } else break;
-      }catch(e2){ console.error(e2); break; }
+    let llmResult;
+    try{
+      llmResult = await callLlm(llmPrompt, null, 6000);
+    }catch(e){
+      console.warn('LLM failed, using original content:', e);
+      llmResult = null;
     }
+
+    // Step 3: Build role bullets map from LLM output (fall back to originals if LLM failed/truncated)
+    const llmRoleBullets = {};
+    if(llmResult && Array.isArray(llmResult.roles)){
+      llmResult.roles.forEach(r => {
+        if(typeof r.idx === 'number' && Array.isArray(r.bullets) && r.bullets.length){
+          llmRoleBullets[r.idx] = r.bullets;
+        }
+      });
+    }
+
+    // Step 4: Assemble final CV from parsed structure + LLM rewrites
+    const cvText = assembleCvMarkdown(
+      parsed,
+      llmResult && llmResult.summary ? llmResult.summary : null,
+      llmRoleBullets
+    );
+
+    currentPackage = {
+      company: (llmResult && llmResult.company) || '',
+      role: (llmResult && llmResult.role) || '',
+      jd,
+      tailoredCV: cvText,
+      coverLetter: (llmResult && llmResult.cover_letter) || '',
+      emailDraft: (llmResult && llmResult.email_draft) || '',
+      skills: (llmResult && llmResult.key_skills_matched) || []
+    };
+
+    // ATS score (no refinement loop — structure is locked, only surface missing keywords in UI)
+    let atsResult = computeATSScore(jd, currentPackage.tailoredCV);
     currentPackage.atsResult = atsResult;
 
     document.getElementById('matchMeta').textContent = currentPackage.company || currentPackage.role
@@ -914,7 +1087,14 @@ function renderResumePdf(rawText, atsResult){
   }
 
   // ---- CV Content ----
-  const lines = (rawText || '').split('\n');
+  // Normalise plain-text CVs: if the very first non-empty line has no markdown
+  // heading prefix, treat it as the name (# H1) so it renders correctly.
+  let rawLines = (rawText || '').split('\n');
+  const firstNonEmpty = rawLines.findIndex(l => l.trim() !== '');
+  if(firstNonEmpty !== -1 && !/^#/.test(rawLines[firstNonEmpty].trim())){
+    rawLines[firstNonEmpty] = '# ' + rawLines[firstNonEmpty].trim();
+  }
+  const lines = rawLines;
   let sawName = false;
   let contactLineRendered = false;
   let afterHeader = false; // track if we just rendered a section header
@@ -944,9 +1124,9 @@ function renderResumePdf(rawText, atsResult){
       return;
     }
 
-    // Contact line detection — email or phone, short line, centered
-    if(!contactLineRendered && sawName && line.length < 200 &&
-       (/\S+@\S+\.\S+/.test(line) || /\+?\d[\d\s\-()]{6,}/.test(line))){
+    // Contact line detection — pipe-separated contact line OR line with email/phone, centered
+    if(!contactLineRendered && sawName && line.length < 300 &&
+       (/\S+@\S+\.\S+/.test(line) || /\+?\d[\d\s\-()]{6,}/.test(line) || /\|/.test(line))){
       ensureSpace(12);
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8.5);
@@ -991,53 +1171,59 @@ function renderResumePdf(rawText, atsResult){
     // H3 -> Job title / company with dates (bold, slightly larger)
     if(/^###\s+/.test(line)){
       let content = line.replace(/^###\s+/, '').replace(/\*\*/g, '');
-      ensureSpace(16);
-      y += 2;
+      ensureSpace(18);
+      y += 3;
 
       // Try to split "Title at Company (Date)" pattern and right-align date
       const dateMatch = content.match(/^(.+?)\s*\(([^)]+)\)\s*$/);
       if(dateMatch){
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(10);
-        doc.setTextColor(25, 25, 25);
-        doc.text(dateMatch[1], margin, y);
-        // Date right-aligned
+        const titlePart = dateMatch[1].trim();
+        const datePart = dateMatch[2].trim();
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        const dateW = doc.getTextWidth(datePart) + 4;
+        const titleWrapped = doc.splitTextToSize(titlePart, usableWidth - dateW - 8);
+        ensureSpace(titleWrapped.length * 13);
+        titleWrapped.forEach((wl, idx) => {
+          if(idx > 0) y += 13;
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(10);
+          doc.setTextColor(25, 25, 25);
+          doc.text(wl, margin, y);
+        });
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(9);
         doc.setTextColor(100, 100, 100);
-        doc.text(dateMatch[2], pageWidth - margin, y, { align: 'right' });
+        doc.text(datePart, pageWidth - margin, y, { align: 'right' });
       } else {
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(10);
         doc.setTextColor(25, 25, 25);
         const wrapped = doc.splitTextToSize(content, usableWidth);
+        ensureSpace(wrapped.length * 13);
         wrapped.forEach((wl, idx) => {
-          if(idx > 0){ y += 12; ensureSpace(12); }
+          if(idx > 0) y += 13;
           doc.text(wl, margin, y);
         });
       }
-      y += 14;
+      y += 15;
       return;
     }
 
     // Bullet points
     if(/^[-*]\s+/.test(line)){
       const content = line.replace(/^[-*]\s+/, '').replace(/\*\*/g, '');
-      ensureSpace(10);
-
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
       doc.setTextColor(35, 35, 35);
-
-      // Bullet character
-      doc.text('•', margin + 6, y);
-
       const bulletWrapped = doc.splitTextToSize(content, usableWidth - 22);
+      ensureSpace(bulletWrapped.length * 12 + 2);
+      doc.text('•', margin + 6, y);
       bulletWrapped.forEach((bullet, idx) => {
-        if(idx > 0){ y += 10; ensureSpace(10); }
+        if(idx > 0) y += 12;
         doc.text(bullet, margin + 18, y);
       });
-      y += 10;
+      y += 13;
       return;
     }
 
@@ -1046,18 +1232,26 @@ function renderResumePdf(rawText, atsResult){
     const jobTitlePattern = /^(.+?)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s']*\d{2,4}\s*[-–]\s*(?:Present|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s']*\d{2,4}))\s*$/i;
     const jtMatch = line.replace(/\*\*/g, '').match(jobTitlePattern);
     if(jtMatch){
-      ensureSpace(16);
-      y += 2;
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.setTextColor(25, 25, 25);
-      doc.text(jtMatch[1].trim(), margin, y);
-      // Date right-aligned
+      ensureSpace(18);
+      y += 3;
+      const jtTitle = jtMatch[1].trim();
+      const jtDate = jtMatch[2].trim();
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      const jtDateW = doc.getTextWidth(jtDate) + 4;
+      const jtWrapped = doc.splitTextToSize(jtTitle, usableWidth - jtDateW - 8);
+      jtWrapped.forEach((wl, idx) => {
+        if(idx > 0) y += 13;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10);
+        doc.setTextColor(25, 25, 25);
+        doc.text(wl, margin, y);
+      });
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
       doc.setTextColor(100, 100, 100);
-      doc.text(jtMatch[2].trim(), pageWidth - margin, y, { align: 'right' });
-      y += 14;
+      doc.text(jtDate, pageWidth - margin, y, { align: 'right' });
+      y += 15;
       return;
     }
 
@@ -1067,10 +1261,10 @@ function renderResumePdf(rawText, atsResult){
     doc.setTextColor(40, 40, 40);
     const plainText = line.replace(/\*\*/g, '');
     const wrappedLines = doc.splitTextToSize(plainText, usableWidth);
+    ensureSpace(wrappedLines.length * 12);
     wrappedLines.forEach((wl) => {
-      ensureSpace(10);
       doc.text(wl, margin, y);
-      y += 10;
+      y += 12;
     });
   });
 
@@ -1124,10 +1318,26 @@ function offerPdfDownload(rawText, title, kind, atsResult){
   toast('PDF ready — click the link below if the download didn\'t start.');
 }
 
-document.getElementById('downloadCvBtn').addEventListener('click', ()=>{
+document.getElementById('downloadCvBtn').addEventListener('click', async ()=>{
   if(!currentPackage) return;
-  const name = `CV_${(currentPackage.company||'Application').replace(/[^a-z0-9]/gi,'_')}`;
-  offerPdfDownload(currentPackage.tailoredCV, name, 'cv', currentPackage.atsResult);
+  const name = `CV_${(currentPackage.company||'Application').replace(/[^a-z0-9]/gi,'_')}.docx`;
+  try{
+    const r = await fetch('http://localhost:5001/api/generate-docx', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ cv_text: currentPackage.tailoredCV })
+    });
+    if(!r.ok){ const e = await r.json(); toast(e.error || 'DOCX generation failed', true); return; }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name; a.rel = 'noopener';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=> URL.revokeObjectURL(url), 5000);
+    toast('DOCX downloaded — open in Word to review and edit.');
+  }catch(err){
+    toast('Could not reach backend for DOCX generation.', true);
+  }
 });
 document.getElementById('downloadCoverBtn').addEventListener('click', ()=>{
   if(!currentPackage) return;

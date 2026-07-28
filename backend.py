@@ -2,7 +2,7 @@
 import os
 import re
 import json
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import requests
 try:
@@ -33,6 +33,170 @@ def health():
         'model': MODEL,
         'docx_support': DOCX_AVAILABLE
     })
+
+@app.route('/api/generate-docx', methods=['POST'])
+def generate_docx():
+    if not DOCX_AVAILABLE:
+        return jsonify({'error': 'python-docx not installed'}), 400
+    try:
+        from io import BytesIO
+        from docx.shared import Pt, RGBColor, Inches
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.oxml.ns import qn
+        from docx.oxml import OxmlElement
+        import copy
+
+        data = request.json or {}
+        cv_text = data.get('cv_text', '')
+        if not cv_text.strip():
+            return jsonify({'error': 'No CV text provided'}), 400
+
+        doc = Document()
+
+        # Page margins
+        for section in doc.sections:
+            section.top_margin = Inches(0.7)
+            section.bottom_margin = Inches(0.7)
+            section.left_margin = Inches(0.85)
+            section.right_margin = Inches(0.85)
+
+        def add_hr(paragraph):
+            p = paragraph._p
+            pPr = p.get_or_add_pPr()
+            pBdr = OxmlElement('w:pBdr')
+            bottom = OxmlElement('w:bottom')
+            bottom.set(qn('w:val'), 'single')
+            bottom.set(qn('w:sz'), '6')
+            bottom.set(qn('w:space'), '1')
+            bottom.set(qn('w:color'), '1E3C37')
+            pBdr.append(bottom)
+            pPr.append(pBdr)
+
+        def set_spacing(paragraph, before=0, after=0, line=None):
+            from docx.oxml.ns import qn
+            pPr = paragraph._p.get_or_add_pPr()
+            pSpacing = OxmlElement('w:spacing')
+            pSpacing.set(qn('w:before'), str(before))
+            pSpacing.set(qn('w:after'), str(after))
+            if line:
+                pSpacing.set(qn('w:line'), str(line))
+                pSpacing.set(qn('w:lineRule'), 'auto')
+            pPr.append(pSpacing)
+
+        lines = cv_text.split('\n')
+        saw_name = False
+        contact_done = False
+
+        for raw_line in lines:
+            line = raw_line.strip()
+
+            # H1 — Name
+            if line.startswith('# '):
+                content = line[2:].replace('**', '')
+                p = doc.add_paragraph()
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                set_spacing(p, before=0, after=40)
+                run = p.add_run(content)
+                run.bold = True
+                run.font.size = Pt(18)
+                run.font.color.rgb = RGBColor(25, 25, 25)
+                saw_name = True
+                continue
+
+            # Contact line
+            if saw_name and not contact_done and line and len(line) < 300 and (
+                '@' in line or '|' in line or 'linkedin' in line.lower() or line.startswith('http')):
+                p = doc.add_paragraph()
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                set_spacing(p, before=0, after=60)
+                run = p.add_run(line.replace('**', ''))
+                run.font.size = Pt(8.5)
+                run.font.color.rgb = RGBColor(80, 80, 80)
+                contact_done = True
+                continue
+
+            # H2 — Section header
+            if line.startswith('## '):
+                content = line[3:].replace('**', '').upper()
+                p = doc.add_paragraph()
+                set_spacing(p, before=120, after=40)
+                run = p.add_run(content)
+                run.bold = True
+                run.font.size = Pt(10)
+                run.font.color.rgb = RGBColor(30, 60, 55)
+                add_hr(p)
+                continue
+
+            # H3 — Job title line
+            if line.startswith('### '):
+                content = line[4:].replace('**', '')
+                # Split off trailing (date) if present
+                date_part = ''
+                title_part = content
+                m = re.match(r'^(.+?)\s*\(([^)]+)\)\s*$', content)
+                if m:
+                    title_part = m.group(1).strip()
+                    date_part = m.group(2).strip()
+
+                p = doc.add_paragraph()
+                set_spacing(p, before=80, after=20, line=276)
+                # Title run
+                run_t = p.add_run(title_part)
+                run_t.bold = True
+                run_t.font.size = Pt(10)
+                run_t.font.color.rgb = RGBColor(25, 25, 25)
+                # Date run — right-aligned via tab stop
+                if date_part:
+                    from docx.oxml import OxmlElement
+                    from docx.oxml.ns import qn
+                    from docx.shared import Inches
+                    pPr = p._p.get_or_add_pPr()
+                    tabs = OxmlElement('w:tabs')
+                    tab = OxmlElement('w:tab')
+                    tab.set(qn('w:val'), 'right')
+                    tab.set(qn('w:pos'), '8640')  # ~6 inches from left margin
+                    tabs.append(tab)
+                    pPr.append(tabs)
+                    run_tab = p.add_run('\t')
+                    run_date = p.add_run(date_part)
+                    run_date.font.size = Pt(9)
+                    run_date.font.color.rgb = RGBColor(100, 100, 100)
+                continue
+
+            # Bullet
+            if line.startswith('- ') or line.startswith('* '):
+                content = line[2:].replace('**', '')
+                p = doc.add_paragraph(style='List Bullet')
+                set_spacing(p, before=0, after=20, line=252)
+                run = p.add_run(content)
+                run.font.size = Pt(9)
+                run.font.color.rgb = RGBColor(35, 35, 35)
+                continue
+
+            # Empty line
+            if not line:
+                continue
+
+            # Plain text
+            p = doc.add_paragraph()
+            set_spacing(p, before=0, after=20, line=252)
+            run = p.add_run(line.replace('**', ''))
+            run.font.size = Pt(9)
+            run.font.color.rgb = RGBColor(40, 40, 40)
+
+        buf = BytesIO()
+        doc.save(buf)
+        buf.seek(0)
+        return send_file(
+            buf,
+            mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            as_attachment=True,
+            download_name='CV.docx'
+        )
+    except Exception as e:
+        import traceback
+        return jsonify({'error': str(e), 'trace': traceback.format_exc()}), 500
+
 
 @app.route('/api/extract-docx', methods=['POST'])
 def extract_docx():
@@ -92,7 +256,7 @@ def generate():
                 'model': MODEL,
                 'messages': messages,
                 'temperature': 0.7,
-                'max_tokens': 8000,
+                'max_tokens': 12000,
                 'stream': False
             },
             timeout=180
@@ -140,7 +304,7 @@ def generate():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    port = int(os.environ.get('FLASK_PORT', 5000))
+    port = int(os.environ.get('FLASK_PORT', 5001))
 
     print(f"🔍 Looking for Ollama at {OLLAMA_BASE}...")
     if not check_ollama():
