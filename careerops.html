@@ -1,0 +1,1371 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CareerOps — Application Pipeline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  :root{
+    --bg: #0B0E14;
+    --panel: #121722;
+    --panel-2: #171d2b;
+    --line: #262e40;
+    --text: #E7EBF3;
+    --muted: #8B96AC;
+    --amber: #F5A623;
+    --teal: #2DD4BF;
+    --red: #F2545B;
+    --green: #4ADE80;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'Inter', sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);}
+  ::selection{background:var(--teal);color:#031412;}
+
+  .app{max-width:1180px;margin:0 auto;padding:28px 24px 80px;}
+
+  /* Header */
+  .topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:28px;flex-wrap:wrap;gap:12px;}
+  .brand{display:flex;align-items:center;gap:12px;}
+  .brand-mark{width:34px;height:34px;border-radius:7px;background:linear-gradient(135deg,var(--teal),#1a8f82);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:700;color:#04201c;font-size:15px;}
+  .brand-text h1{font-size:17px;margin:0;letter-spacing:.2px;}
+  .brand-text .sub{font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:.4px;}
+  .status-pill{font-family:var(--mono);font-size:11px;color:var(--teal);border:1px solid rgba(45,212,191,.35);background:rgba(45,212,191,.08);padding:5px 10px;border-radius:20px;display:flex;align-items:center;gap:6px;}
+  .status-pill .dot{width:6px;height:6px;border-radius:50%;background:var(--teal);box-shadow:0 0 6px var(--teal);}
+
+  /* Tabs */
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:24px;overflow-x:auto;}
+  .tab{font-family:var(--mono);font-size:12.5px;letter-spacing:.3px;color:var(--muted);background:none;border:none;padding:12px 16px;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;transition:.15s;}
+  .tab:hover{color:var(--text);}
+  .tab.active{color:var(--amber);border-bottom-color:var(--amber);}
+  .tab .idx{opacity:.5;margin-right:6px;}
+
+  .view{display:none;}
+  .view.active{display:block;animation:fadein .25s ease;}
+  @keyframes fadein{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:none;}}
+
+  h2.view-title{font-size:19px;margin:0 0 4px;}
+  p.view-desc{color:var(--muted);font-size:13.5px;margin:0 0 22px;line-height:1.5;}
+
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px;margin-bottom:18px;}
+  .panel-title{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:0 0 14px;display:flex;align-items:center;justify-content:space-between;}
+
+  label{display:block;font-size:12.5px;color:var(--muted);margin:0 0 6px;font-weight:500;}
+  textarea, input[type=text], input[type=date], select{
+    width:100%;background:var(--panel-2);border:1px solid var(--line);border-radius:7px;color:var(--text);
+    padding:10px 12px;font-family:var(--sans);font-size:13.5px;resize:vertical;outline:none;transition:.15s;
+  }
+  textarea:focus, input:focus, select:focus{border-color:var(--teal);}
+  textarea{min-height:110px;line-height:1.5;}
+  .field{margin-bottom:16px;}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  @media(max-width:640px){.row{grid-template-columns:1fr;}}
+
+  .btn{font-family:var(--mono);font-size:12.5px;letter-spacing:.3px;border-radius:7px;border:1px solid var(--line);
+    background:var(--panel-2);color:var(--text);padding:10px 16px;cursor:pointer;transition:.15s;display:inline-flex;align-items:center;gap:8px;}
+  .btn:hover{border-color:var(--teal);color:var(--teal);}
+  .btn.primary{background:var(--amber);border-color:var(--amber);color:#231400;font-weight:600;}
+  .btn.primary:hover{opacity:.9;color:#231400;}
+  .btn.ghost{background:none;}
+  .btn:disabled{opacity:.5;cursor:not-allowed;}
+  .btn-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px;}
+
+  .empty{text-align:center;padding:50px 20px;color:var(--muted);}
+  .empty .glyph{font-family:var(--mono);font-size:26px;color:var(--line);margin-bottom:10px;}
+
+  /* Table */
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th{text-align:left;font-family:var(--mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);padding:8px 10px;border-bottom:1px solid var(--line);}
+  td{padding:10px;border-bottom:1px solid var(--line);vertical-align:top;}
+  tr:hover td{background:rgba(255,255,255,.02);}
+  .badge{font-family:var(--mono);font-size:10.5px;padding:3px 8px;border-radius:20px;display:inline-block;white-space:nowrap;}
+  .badge.Applied{background:rgba(45,212,191,.12);color:var(--teal);}
+  .badge.Screening{background:rgba(245,166,35,.12);color:var(--amber);}
+  .badge.Interview{background:rgba(245,166,35,.12);color:var(--amber);}
+  .badge.Offer{background:rgba(74,222,128,.12);color:var(--green);}
+  .badge.Rejected{background:rgba(242,84,91,.12);color:var(--red);}
+  .badge.Ghosted{background:rgba(139,150,172,.15);color:var(--muted);}
+  .icon-btn{background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:4px;}
+  .icon-btn:hover{color:var(--red);}
+  .followup-flag{font-family:var(--mono);font-size:10.5px;color:var(--red);}
+
+  .stat-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px;}
+  @media(max-width:700px){.stat-row{grid-template-columns:1fr 1fr;}}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;}
+  .stat .num{font-family:var(--mono);font-size:24px;font-weight:600;}
+  .stat .lbl{font-size:11.5px;color:var(--muted);margin-top:4px;}
+
+  .result-block{margin-top:20px;}
+  .result-tabs{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;}
+  .rtab{font-family:var(--mono);font-size:11.5px;padding:6px 12px;border-radius:6px;border:1px solid var(--line);background:var(--panel-2);color:var(--muted);cursor:pointer;}
+  .rtab.active{color:var(--teal);border-color:var(--teal);}
+  .result-content{background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:16px;white-space:pre-wrap;font-size:13px;line-height:1.6;max-height:420px;overflow:auto;font-family:var(--mono);}
+  .result-content.editable{white-space:normal;}
+  .result-content[contenteditable=true]{outline:none;}
+
+  .skill-tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;}
+  .skill-tag{font-family:var(--mono);font-size:10.5px;background:rgba(45,212,191,.1);color:var(--teal);padding:3px 9px;border-radius:20px;}
+
+  .ats-block{display:flex;align-items:center;gap:16px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:14px 16px;margin-bottom:14px;flex-wrap:wrap;}
+  .ats-score-ring{width:56px;height:56px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:700;font-size:16px;flex-shrink:0;border:3px solid var(--line);}
+  .ats-score-ring.good{border-color:var(--green);color:var(--green);}
+  .ats-score-ring.mid{border-color:var(--amber);color:var(--amber);}
+  .ats-score-ring.low{border-color:var(--red);color:var(--red);}
+  .ats-info{flex:1;min-width:200px;}
+  .ats-label{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:4px;}
+  .ats-sub{font-size:12.5px;color:var(--muted);line-height:1.5;}
+  .ats-kw-wrap{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;}
+  .kw-tag{font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:20px;}
+  .kw-tag.matched{background:rgba(74,222,128,.12);color:var(--green);}
+  .kw-tag.missing{background:rgba(242,84,91,.1);color:var(--red);}
+
+  .spinner{width:14px;height:14px;border:2px solid rgba(255,255,255,.2);border-top-color:var(--amber);border-radius:50%;animation:spin .7s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  .role-select{margin-bottom:14px;}
+  .q-item{background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-bottom:10px;}
+  .q-item .q-meta{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-bottom:6px;display:flex;justify-content:space-between;}
+  .q-item .q-text{font-size:13.5px;line-height:1.5;}
+  .q-item .q-notes{font-size:12.5px;color:var(--muted);margin-top:6px;border-left:2px solid var(--line);padding-left:8px;}
+
+  .ats-warning{background:rgba(242,84,91,.1);border:1px solid var(--red);border-radius:8px;padding:12px;margin-bottom:14px;display:flex;align-items:flex-start;gap:10px;}
+  .ats-warning .icon{font-size:16px;color:var(--red);flex-shrink:0;}
+  .ats-warning .content{flex:1;}
+  .ats-warning .content div:first-child{font-weight:600;color:var(--red);margin-bottom:4px;}
+  .ats-warning .content div:last-child{font-size:12px;color:var(--muted);line-height:1.5;}
+
+  .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--panel);border:1px solid var(--teal);color:var(--teal);
+    font-family:var(--mono);font-size:12.5px;padding:10px 18px;border-radius:8px;opacity:0;pointer-events:none;transition:.25s;z-index:99;}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(-6px);}
+  .toast.error{border-color:var(--red);color:var(--red);}
+
+  .muted-note{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.5;}
+  a.link{color:var(--teal);text-decoration:none;}
+  a.link:hover{text-decoration:underline;}
+
+  .upload-zone{border:1.5px dashed var(--line);border-radius:8px;padding:22px;text-align:center;cursor:pointer;
+    background:var(--panel-2);font-size:13px;color:var(--muted);transition:.15s;}
+  .upload-zone:hover, .upload-zone.dragover{border-color:var(--teal);color:var(--text);background:rgba(45,212,191,.05);}
+  .upload-zone .link-inline{color:var(--teal);text-decoration:underline;}
+  .upload-zone.loading{opacity:.7;}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-mark">&gt;_</div>
+      <div class="brand-text">
+        <h1>CareerOps</h1>
+        <div class="sub">application delivery pipeline</div>
+      </div>
+    </div>
+    <div class="status-pill"><span class="dot"></span> <span id="profileStatus">base profile not set</span></div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" data-view="deploy"><span class="idx">01</span>Deploy</button>
+    <button class="tab" data-view="pipeline"><span class="idx">02</span>Pipeline</button>
+    <button class="tab" data-view="runbook"><span class="idx">03</span>Runbook</button>
+    <button class="tab" data-view="profile"><span class="idx">04</span>Base Profile</button>
+  </div>
+
+  <!-- DEPLOY VIEW -->
+  <div class="view active" id="view-deploy">
+    <h2 class="view-title">New deployment</h2>
+    <p class="view-desc">Paste a job description. Your base profile gets rewritten and packaged against it — tailored CV, cover letter, and outreach email — without touching the original.</p>
+
+    <div class="panel">
+      <div class="panel-title">Job description</div>
+      <div class="field">
+        <textarea id="jdInput" placeholder="Paste the full job description here..." style="min-height:180px;"></textarea>
+      </div>
+      <div class="btn-row">
+        <button class="btn primary" id="generateBtn">Generate application package</button>
+        <span id="genStatus" class="muted-note"></span>
+      </div>
+    </div>
+
+    <div class="result-block" id="resultBlock" style="display:none;">
+      <div class="panel">
+        <div class="panel-title">Package output <span id="matchMeta" style="color:var(--teal);"></span></div>
+        <div class="result-tabs">
+          <button class="rtab active" data-rt="cv">Tailored CV</button>
+          <button class="rtab" data-rt="cover">Cover Letter</button>
+          <button class="rtab" data-rt="email">Outreach Email</button>
+        </div>
+        <div class="ats-block" id="atsBlock" style="display:none;">
+          <div class="ats-score-ring" id="atsRing">--</div>
+          <div class="ats-info">
+            <div class="ats-label">ATS match score</div>
+            <div class="ats-sub" id="atsSub">Scored against keywords, structure, and quantified impact from the JD.</div>
+            <div class="ats-kw-wrap" id="atsKwWrap"></div>
+          </div>
+          <button class="btn ghost" id="rescoreBtn" style="font-size:11px;padding:6px 10px;">rescore edits</button>
+        </div>
+        <div class="result-content editable" id="rtContent" contenteditable="true"></div>
+        <div class="skill-tags" id="skillTags"></div>
+        <div class="btn-row" style="margin-top:16px;">
+          <button class="btn" id="downloadCvBtn">Download CV (PDF)</button>
+          <button class="btn" id="downloadCoverBtn">Download Cover Letter (PDF)</button>
+          <button class="btn primary" id="logApplicationBtn">Log this application →</button>
+        </div>
+        <div id="pdfLinks" style="margin-top:10px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PIPELINE VIEW -->
+  <div class="view" id="view-pipeline">
+    <h2 class="view-title">Pipeline</h2>
+    <p class="view-desc">Every deployment you've logged, its stage, and when it needs a follow-up nudge.</p>
+
+    <div class="stat-row" id="statRow"></div>
+
+    <div class="panel">
+      <div class="panel-title">
+        Applications
+        <button class="btn ghost" id="addManualBtn" style="font-size:11px;padding:6px 10px;">+ add manually</button>
+      </div>
+      <div id="pipelineTableWrap"></div>
+    </div>
+  </div>
+
+  <!-- RUNBOOK VIEW -->
+  <div class="view" id="view-runbook">
+    <h2 class="view-title">Runbook</h2>
+    <p class="view-desc">Interview questions you've been asked, organized by role, so the next round doesn't start from zero.</p>
+
+    <div class="panel">
+      <div class="panel-title">Log a question</div>
+      <div class="row">
+        <div class="field">
+          <label>Company / Role</label>
+          <select id="qRoleSelect"><option value="">— select from pipeline —</option></select>
+        </div>
+        <div class="field">
+          <label>Or type a new one</label>
+          <input type="text" id="qRoleCustom" placeholder="e.g. Acme Corp — Senior DevOps Engineer">
+        </div>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>Question type</label>
+          <select id="qType">
+            <option value="technical">Technical</option>
+            <option value="behavioral">Behavioral</option>
+            <option value="systemdesign">System Design</option>
+            <option value="leadership">Leadership</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Interview round (optional)</label>
+          <input type="text" id="qRound" placeholder="e.g. Phone screen, Round 1, Final">
+        </div>
+      </div>
+      <div class="field">
+        <label>Question asked</label>
+        <textarea id="qText" style="min-height:70px;" placeholder="e.g. Walk me through diagnosing a replication lag issue in production."></textarea>
+      </div>
+      <div class="field">
+        <label>Your answer / Notes (optional)</label>
+        <textarea id="qNotes" style="min-height:70px;" placeholder="How you answered, what went well, what you'd do differently..."></textarea>
+      </div>
+      <div class="field">
+        <label>Feedback / Outcome (optional)</label>
+        <select id="qOutcome">
+          <option value="">— no outcome yet —</option>
+          <option value="strong">Strong / Positive feedback</option>
+          <option value="okay">Okay / Neutral</option>
+          <option value="weak">Weak / Needs improvement</option>
+          <option value="follow-up">Follow-up question asked</option>
+        </select>
+      </div>
+      <div class="btn-row">
+        <button class="btn primary" id="addQBtn">Add to runbook</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">
+        Browse
+        <select id="qFilterSelect" style="width:auto;font-family:var(--mono);font-size:11.5px;"><option value="">all roles</option></select>
+      </div>
+      <div id="questionsWrap"></div>
+    </div>
+  </div>
+
+  <!-- PROFILE VIEW -->
+  <div class="view" id="view-profile">
+    <h2 class="view-title">Base profile</h2>
+    <p class="view-desc">Your master CV. Every tailored version is generated from this — keep it complete and current, edits here don't affect past packages.</p>
+
+    <div class="panel">
+      <div class="panel-title">CV content (plain text or markdown)</div>
+      <div class="field">
+        <label>Upload a PDF or DOCX (text is extracted automatically), or paste directly below</label>
+        <div class="upload-zone" id="uploadZone">
+          <input type="file" id="cvFileInput" accept="application/pdf,.docx" style="display:none;">
+          <span id="uploadZoneText">Drop a PDF or DOCX here or <span class="link-inline">click to browse</span></span>
+        </div>
+        <div id="uploadStatus" class="muted-note"></div>
+      </div>
+      <div class="field">
+        <textarea id="baseCvInput" style="min-height:380px;" placeholder="Paste your full CV here — experience, skills, education, everything. The tailoring engine works best with complete source material."></textarea>
+      </div>
+      <div class="btn-row">
+        <button class="btn primary" id="saveCvBtn">Save base profile</button>
+        <span id="cvSaveStatus" class="muted-note"></span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const { jsPDF } = window.jspdf;
+
+// ---------- storage helpers ----------
+async function sget(key){
+  try{
+    const val = localStorage.getItem(key);
+    return val ? { value: val } : null;
+  }catch(e){
+    console.error('storage get failed', e);
+    return null;
+  }
+}
+async function sset(key, value){
+  for(let attempt=0; attempt<2; attempt++){
+    try{
+      localStorage.setItem(key, value);
+      return true;
+    }catch(e){
+      console.error('storage set failed (attempt '+(attempt+1)+')', e);
+      await new Promise(res=> setTimeout(res, 500));
+    }
+  }
+  return null;
+}
+
+function toast(msg, isError){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (isError ? ' error' : '');
+  setTimeout(()=> t.className = 'toast', 2600);
+}
+
+// ---------- state ----------
+let baseCv = '';
+let baseCvTimestamp = null;  // Track when base CV was last saved
+let applications = [];   // {id, company, role, jd, dateApplied, status, followUpDate, notes, tailoredCV, coverLetter, emailDraft, skills, atsScore, baseCvVersion}
+let runbook = {};        // { "company — role": [{id, question, type, round, outcome, notes, date}] }
+let currentPackage = null; // last generated, not yet logged
+let currentRtab = 'cv';
+
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+
+// ---------- init ----------
+async function init(){
+  const cvData = await sget('base-cv');
+  baseCv = cvData || '';
+  baseCvTimestamp = await sget('base-cv-timestamp') || null;
+  document.getElementById('baseCvInput').value = baseCv;
+  updateProfileStatus();
+
+  try{ applications = JSON.parse(await sget('app-log') || '[]'); }catch(e){ applications = []; }
+  try{ runbook = JSON.parse(await sget('runbook') || '{}'); }catch(e){ runbook = {}; }
+
+  renderPipeline();
+  renderRunbookSelectors();
+  renderQuestions();
+
+  document.querySelectorAll('.tab').forEach(t=>{
+    t.addEventListener('click', ()=>{
+      document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+      document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));
+      t.classList.add('active');
+      document.getElementById('view-'+t.dataset.view).classList.add('active');
+      if(t.dataset.view === 'pipeline') renderPipeline();
+      if(t.dataset.view === 'runbook'){ renderRunbookSelectors(); renderQuestions(); }
+    });
+  });
+}
+init();
+
+function updateProfileStatus(){
+  const el = document.getElementById('profileStatus');
+  el.textContent = baseCv.trim() ? 'base profile loaded' : 'base profile not set';
+}
+
+// ---------- PROFILE VIEW ----------
+if(window['pdfjsLib']){
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
+
+async function extractPdfText(file){
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+  let text = '';
+  for(let i=1; i<=pdf.numPages; i++){
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    let lastY = null;
+    content.items.forEach(item=>{
+      if(lastY !== null && Math.abs(item.transform[5] - lastY) > 2) text += '\n';
+      text += item.str + ' ';
+      lastY = item.transform[5];
+    });
+    text += '\n\n';
+  }
+  return text.replace(/[ \t]+\n/g,'\n').replace(/\n{3,}/g,'\n\n').trim();
+}
+
+async function handleCvFile(file){
+  if(!file) return;
+  const zone = document.getElementById('uploadZone');
+  const zoneText = document.getElementById('uploadZoneText');
+  const status = document.getElementById('uploadStatus');
+  zone.classList.add('loading');
+
+  const isDocx = file.name.toLowerCase().endsWith('.docx');
+  const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+
+  if(!isPdf && !isDocx){
+    toast('Please upload a PDF or DOCX file.', true);
+    return;
+  }
+
+  zoneText.innerHTML = `<span class="spinner" style="display:inline-block;vertical-align:middle;"></span> extracting text from ${isDocx?'DOCX':'PDF'}...`;
+  try{
+    let text;
+    if(isPdf) {
+      text = await extractPdfText(file);
+    } else {
+      text = await extractDocxText(file);
+    }
+
+    if(!text.trim()){
+      status.textContent = `Could not extract text from the ${isDocx?'DOCX':'PDF'}. Try pasting the CV text manually.`;
+      status.style.color = 'var(--red)';
+    } else {
+      document.getElementById('baseCvInput').value = text;
+      status.textContent = `Extracted ${text.split(/\s+/).filter(Boolean).length} words from "${file.name}". Review below, then save.`;
+      status.style.color = 'var(--teal)';
+    }
+  }catch(err){
+    console.error(err);
+    status.textContent = `Failed to read that ${isDocx?'DOCX':'PDF'}. Try re-exporting it or paste the text directly.`;
+    status.style.color = 'var(--red)';
+  }finally{
+    zone.classList.remove('loading');
+    zoneText.innerHTML = 'Drop a PDF or DOCX here or <span class="link-inline">click to browse</span>';
+  }
+}
+
+async function extractDocxText(file){
+  const formData = new FormData();
+  formData.append('file', file);
+  const response = await fetch('http://localhost:5000/api/extract-docx', {
+    method: 'POST',
+    body: formData
+  });
+  if(!response.ok) {
+    const err = await response.json();
+    throw new Error(err.error || 'Failed to extract DOCX');
+  }
+  const data = await response.json();
+  return data.text;
+}
+
+const uploadZone = document.getElementById('uploadZone');
+const cvFileInput = document.getElementById('cvFileInput');
+uploadZone.addEventListener('click', ()=> cvFileInput.click());
+cvFileInput.addEventListener('change', (e)=> handleCvFile(e.target.files[0]));
+['dragenter','dragover'].forEach(evt=>{
+  uploadZone.addEventListener(evt, (e)=>{ e.preventDefault(); uploadZone.classList.add('dragover'); });
+});
+['dragleave','drop'].forEach(evt=>{
+  uploadZone.addEventListener(evt, (e)=>{ e.preventDefault(); uploadZone.classList.remove('dragover'); });
+});
+uploadZone.addEventListener('drop', (e)=>{
+  const file = e.dataTransfer.files[0];
+  handleCvFile(file);
+});
+
+document.getElementById('saveCvBtn').addEventListener('click', async ()=>{
+  const val = document.getElementById('baseCvInput').value;
+  const statusEl = document.getElementById('cvSaveStatus');
+  statusEl.textContent = 'saving...';
+  const result = await sset('base-cv', val);
+  if(result){
+    baseCv = val;
+    baseCvTimestamp = new Date().toISOString();
+    await sset('base-cv-timestamp', baseCvTimestamp);
+    updateProfileStatus();
+    statusEl.textContent = 'saved ✓';
+    statusEl.style.color = 'var(--teal)';
+  } else {
+    statusEl.textContent = 'save failed — check your connection and try again';
+    statusEl.style.color = 'var(--red)';
+    toast('Could not save base profile — try again.', true);
+  }
+  setTimeout(()=>{ statusEl.textContent = ''; statusEl.style.color = ''; }, 3000);
+});
+
+// ---------- DEPLOY VIEW: generation ----------
+document.getElementById('generateBtn').addEventListener('click', generatePackage);
+
+async function generatePackage(){
+  const jd = document.getElementById('jdInput').value.trim();
+  if(!jd){ toast('Paste a job description first.', true); return; }
+  if(!baseCv || !baseCv.trim()){ toast('Set your base profile first (Base Profile tab).', true); return; }
+
+  const btn = document.getElementById('generateBtn');
+  const statusEl = document.getElementById('genStatus');
+  btn.disabled = true;
+  statusEl.innerHTML = '<span class="spinner" style="display:inline-block;vertical-align:middle;"></span> tailoring your profile...';
+
+  const systemPrompt = `You are a CV writer. Given a base CV and job description, produce a JSON application package.
+
+ABSOLUTE RULES FOR "tailored_cv":
+- NEVER add skills, technologies, or tools that are NOT mentioned in the base CV. Only use what the candidate actually lists.
+- NEVER fabricate, invent, or assume technologies. If PostgreSQL is not in the base CV, do NOT add it.
+- DO reorder and emphasize existing skills that match the JD.
+- DO reframe experience bullets to highlight JD-relevant aspects using ONLY real experience.
+
+MARKDOWN FORMAT:
+- # for name ONLY (line 1): # Name - Title
+- ## for ALL section headers
+- ### for job title lines: ### Title at Company (Date)
+- - for bullets
+
+SECTION ORDER: Summary, Skills, Professional Experience, Certifications
+- Summary: 2-3 sentences (paragraph, not bullets)
+- Skills: grouped by category, ONLY skills from the base CV
+- Experience: ALL roles from base CV with ### headers, 3-4 concise bullets each
+- Certifications: ALL certs from base CV
+
+CRITICAL:
+- Include ALL job roles from the base CV. Do not skip any.
+- Do not truncate or write "continued". Output the COMPLETE CV.
+- Do NOT include cover letter or email in this field.
+- Keep bullets concise (1-2 lines each) to fit all roles.
+
+Respond with ONLY valid JSON:
+{"company":"string","role":"string","tailored_cv":"complete markdown CV","cover_letter":"plain text under 250 words","email_draft":"under 100 words, first line Subject:","key_skills_matched":["5-8 phrases"]}`;
+
+  const userMsg = `BASE CV:\n${baseCv}\n\n---\n\nJOB DESCRIPTION:\n${jd}`;
+
+  try{
+    const response = await fetch("http://localhost:5000/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 8000,
+        system: systemPrompt,
+        user_message: userMsg
+      })
+    });
+    const data = await response.json();
+    const textBlock = (data.content || []).find(b => b.type === 'text');
+    if(!textBlock) throw new Error('No text response from model');
+    let clean = textBlock.text.trim().replace(/^```json/i,'').replace(/^```/,'').replace(/```$/,'').trim();
+    // Fix control characters inside JSON string values (not structural whitespace)
+    clean = clean.replace(/"((?:[^"\\]|\\.)*)"/g, (match, inner) => {
+      const fixed = inner.replace(/[\x00-\x1F\x7F]/g, (ch) => {
+        const esc = {'\n':'\\n','\r':'\\r','\t':'\\t'};
+        return esc[ch] || '';
+      });
+      return '"' + fixed + '"';
+    });
+    const parsed = JSON.parse(clean);
+
+    // Post-process: fix common LLM output issues in the CV field
+    let cvText = parsed.tailored_cv || '';
+    // Remove email draft sections that may have leaked in
+    cvText = cvText.replace(/\n*(Email Draft|Email|Subject:)[\s\S]*$/i, '');
+    // Remove cover letter sections that may have leaked in
+    cvText = cvText.replace(/\n*(Cover Letter|Dear\s+(Hiring|Sir|Madam|Recruiting|HR))[\s\S]*$/i, '');
+    // Remove "Continued in next message" truncation artifacts
+    cvText = cvText.replace(/\n*\.{0,3}\s*\(Continued[^)]*\).*$/i, '');
+    cvText = cvText.replace(/\n*\.{3}\s*$/i, '');
+    // Fix # used for section headers (should be ##). Only the first # line should stay as #
+    let firstH1Seen = false;
+    cvText = cvText.split('\n').map(line => {
+      if(/^#\s+/.test(line) && !/^##/.test(line)){
+        if(!firstH1Seen){ firstH1Seen = true; return line; } // keep first # as name
+        return '#' + line; // convert subsequent # to ##
+      }
+      return line;
+    }).join('\n');
+    // Fix section ordering if out of order (Summary should come first after name)
+    // Detect if Certifications comes before Experience and reorder
+    const sections = [];
+    let currentSection = { header: '', lines: [] };
+    cvText.split('\n').forEach(line => {
+      if(/^##\s+/i.test(line)){
+        if(currentSection.header || currentSection.lines.length) sections.push(currentSection);
+        currentSection = { header: line, lines: [] };
+      } else {
+        currentSection.lines.push(line);
+      }
+    });
+    if(currentSection.header || currentSection.lines.length) sections.push(currentSection);
+    
+    // Separate the name/pre-section content from sections
+    const preSections = sections.filter(s => !s.header);
+    const namedSections = sections.filter(s => s.header);
+    
+    // Sort sections: Summary, Skills, Experience, Certifications/Education
+    const sectionOrder = { summary: 0, skills: 1, 'technical skills': 1, 'core skills': 1, 
+      'professional experience': 2, experience: 2, 'work experience': 2, 
+      certifications: 3, education: 4, projects: 5 };
+    namedSections.sort((a, b) => {
+      const aName = a.header.replace(/^##\s+/i, '').toLowerCase().trim();
+      const bName = b.header.replace(/^##\s+/i, '').toLowerCase().trim();
+      const aOrder = sectionOrder[aName] ?? 99;
+      const bOrder = sectionOrder[bName] ?? 99;
+      return aOrder - bOrder;
+    });
+    
+    cvText = [...preSections, ...namedSections]
+      .map(s => (s.header ? s.header + '\n' : '') + s.lines.join('\n'))
+      .join('\n').trim();
+
+    currentPackage = {
+      company: parsed.company || '',
+      role: parsed.role || '',
+      jd,
+      tailoredCV: cvText,
+      coverLetter: parsed.cover_letter || '',
+      emailDraft: parsed.email_draft || '',
+      skills: parsed.key_skills_matched || []
+    };
+
+    // ATS refinement loop — target 80+, up to 2 extra passes
+    let atsResult = computeATSScore(jd, currentPackage.tailoredCV);
+    let attempt = 0;
+    while(atsResult.score < 80 && attempt < 3){
+      attempt++;
+      statusEl.innerHTML = `<span class="spinner" style="display:inline-block;vertical-align:middle;"></span> optimizing for ATS match (pass ${attempt}/3, current score: ${atsResult.score})...`;
+      const revisePrompt = `A tailored CV currently scores ${atsResult.score}/100 on ATS keyword matching. Target is 80+.
+
+JOB DESCRIPTION:
+${jd}
+
+CURRENT CV:
+${currentPackage.tailoredCV}
+
+MISSING KEYWORDS: ${atsResult.missing.join(', ')}
+
+RULES (STRICT):
+1. Only add keywords that genuinely exist in the BASE CV below. Do NOT invent or fabricate skills/tools.
+2. If a missing keyword exists in the base CV but was omitted from the tailored CV, add it back.
+3. If a missing keyword does NOT exist in the base CV, skip it entirely. Never fabricate.
+4. Reframe existing bullets to naturally mention applicable keywords already in the candidate's background.
+5. Keep ALL job roles from the base CV. Do not remove any.
+6. Keep markdown structure: # name, ## sections, ### job titles, - bullets.
+7. Keep bullets concise (1-2 lines). Include the COMPLETE CV, all roles.
+
+BASE CV (source of truth - ONLY use skills/tools mentioned here):
+${baseCv}
+
+Respond with ONLY valid JSON: {"tailored_cv": "the complete revised CV in markdown"}`;
+
+      try{
+        const r2 = await fetch("http://localhost:5000/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "claude-sonnet-4-6",
+            max_tokens: 6000,
+            user_message: revisePrompt
+          })
+        });
+        const d2 = await r2.json();
+        const tb2 = (d2.content || []).find(b => b.type === 'text');
+        if(!tb2) break;
+        let c2 = tb2.text.trim().replace(/^```json/i,'').replace(/^```/,'').replace(/```$/,'').trim();
+        // Fix control characters inside JSON string values
+        c2 = c2.replace(/"((?:[^"\\]|\\.)*)"/g, (match, inner) => {
+          const fixed = inner.replace(/[\x00-\x1F\x7F]/g, (ch) => {
+            const esc = {'\n':'\\n','\r':'\\r','\t':'\\t'};
+            return esc[ch] || '';
+          });
+          return '"' + fixed + '"';
+        });
+        const p2 = JSON.parse(c2);
+        if(p2.tailored_cv){
+          currentPackage.tailoredCV = p2.tailored_cv;
+          atsResult = computeATSScore(jd, currentPackage.tailoredCV);
+        } else break;
+      }catch(e2){ console.error(e2); break; }
+    }
+    currentPackage.atsResult = atsResult;
+
+    document.getElementById('matchMeta').textContent = currentPackage.company || currentPackage.role
+      ? `— ${currentPackage.company || 'Unknown Co.'} / ${currentPackage.role || 'role'}` : '';
+    document.getElementById('pdfLinks').innerHTML = '';
+    showResultTab('cv');
+    document.getElementById('resultBlock').style.display = 'block';
+    document.getElementById('resultBlock').scrollIntoView({behavior:'smooth', block:'start'});
+    statusEl.textContent = '';
+  }catch(err){
+    console.error('Generation error:', err);
+    statusEl.textContent = '';
+    let msg = err.message || 'Generation failed';
+    if(msg.includes('Failed to fetch') || msg.includes('NetworkError')){
+      msg = 'Cannot reach backend. Is it running on port 5000? (python3 backend.py)';
+    }
+    if(msg.includes('Ollama')){
+      msg = 'Ollama not responding. Start it with: ollama serve';
+    }
+    toast(msg, true);
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+document.querySelectorAll('.rtab').forEach(b=>{
+  b.addEventListener('click', ()=> showResultTab(b.dataset.rt));
+});
+
+function showResultTab(which){
+  currentRtab = which;
+  document.querySelectorAll('.rtab').forEach(b=> b.classList.toggle('active', b.dataset.rt === which));
+  const content = document.getElementById('rtContent');
+  if(!currentPackage) return;
+  if(which === 'cv') content.textContent = currentPackage.tailoredCV;
+  if(which === 'cover') content.textContent = currentPackage.coverLetter;
+  if(which === 'email') content.textContent = currentPackage.emailDraft;
+  document.getElementById('skillTags').innerHTML = which === 'cv'
+    ? currentPackage.skills.map(s=>`<span class="skill-tag">${escapeHtml(s)}</span>`).join('')
+    : '';
+
+  const atsBlock = document.getElementById('atsBlock');
+  if(which === 'cv'){
+    if(!currentPackage.atsResult) currentPackage.atsResult = computeATSScore(currentPackage.jd, currentPackage.tailoredCV);
+    renderAtsScore(currentPackage.atsResult);
+  } else {
+    atsBlock.style.display = 'none';
+  }
+}
+
+document.getElementById('rescoreBtn').addEventListener('click', ()=>{
+  if(!currentPackage) return;
+  currentPackage.atsResult = computeATSScore(currentPackage.jd, currentPackage.tailoredCV);
+  renderAtsScore(currentPackage.atsResult);
+});
+
+// keep edits the user makes in the contenteditable box
+document.getElementById('rtContent').addEventListener('input', (e)=>{
+  if(!currentPackage) return;
+  const val = e.target.textContent;
+  if(currentRtab === 'cv'){
+    currentPackage.tailoredCV = val;
+    document.getElementById('atsSub').textContent = 'Edited since last score — click "rescore edits" to update.';
+  }
+  if(currentRtab === 'cover') currentPackage.coverLetter = val;
+  if(currentRtab === 'email') currentPackage.emailDraft = val;
+});
+
+function escapeHtml(s){ return (s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// ---------- ATS scoring engine ----------
+const STOPWORDS = new Set(("a an the and or but if then else for of to in on at by with without from into over under again "+
+  "further once here there when where why how all any both each few more most other some such no nor not only own same so "+
+  "than too very s t can will just don should now is are was were be been being have has had do does did doing this that "+
+  "these those i you he she it we they what which who whom as about between during before after above below up down out "+
+  "we're they're it's you'll our your their his her its us them me my mine yours ours theirs "+
+  "role team work years experience ability strong looking join including etc responsibilities requirements preferred "+
+  "required skills knowledge understanding excellent good great must plus within across using use used help ensure "+
+  "including company job description candidate ideal successful applicants apply application please note "+
+  "also make working services love opportunity competitive salary realize potential international projects "+
+  "friendly need able new other will the").split(/\s+/));
+
+function extractKeywords(text, topN){
+  const counts = {};
+  // Extract individual meaningful words/terms
+  const matches = (text || '').match(/[A-Za-z][A-Za-z0-9+#\/\-\.]{1,}/g) || [];
+  matches.forEach(raw=>{
+    const w = raw.toLowerCase().replace(/^[\-\.\/]+|[\-\.\/]+$/g,'');
+    if(w.length < 2) return;
+    if(STOPWORDS.has(w)) return;
+    if(/^\d+$/.test(w)) return;
+    counts[w] = (counts[w] || 0) + 1;
+  });
+
+  // Also extract capitalized/tech terms that are likely proper nouns or technologies
+  // These get a frequency boost so they rank higher
+  const techMatches = (text || '').match(/\b[A-Z][A-Za-z0-9+#\/.]*[A-Za-z0-9]\b/g) || [];
+  techMatches.forEach(raw => {
+    const w = raw.toLowerCase();
+    if(w.length < 2 || STOPWORDS.has(w)) return;
+    counts[w] = (counts[w] || 0) + 3; // boost tech/proper nouns
+  });
+
+  // Extract terms in parentheses (often tech stacks)
+  const parenMatches = (text || '').match(/\(([^)]+)\)/g) || [];
+  parenMatches.forEach(paren => {
+    const inner = paren.slice(1, -1);
+    inner.split(/[,\s]+/).forEach(t => {
+      const w = t.toLowerCase().replace(/^[\-\.\/]+|[\-\.\/]+$/g,'');
+      if(w.length >= 2 && !STOPWORDS.has(w)){
+        counts[w] = (counts[w] || 0) + 4; // high boost for parenthesized tech
+      }
+    });
+  });
+
+  return Object.entries(counts)
+    .sort((a,b)=> b[1]-a[1])
+    .slice(0, topN || 25)
+    .map(([w])=> w);
+}
+
+function computeATSScore(jdText, cvText){
+  const cvLower = (cvText || '').toLowerCase();
+  const targetKeywords = extractKeywords(jdText, 25);
+  const matched = targetKeywords.filter(k => cvLower.includes(k));
+  const missing = targetKeywords.filter(k => !cvLower.includes(k));
+  const kwRatio = targetKeywords.length ? matched.length / targetKeywords.length : 1;
+  // Keywords are 70% of the score (most important for ATS)
+  const kwPoints = kwRatio * 70;
+
+  const sectionHits = ['experience','education','skills','summary','projects','certifications']
+    .filter(s => new RegExp('(^|\\n)\\s*#{0,3}\\s*'+s, 'i').test(cvText||''));
+  const sectionPoints = Math.min(sectionHits.length, 3) / 3 * 12;
+
+  const quantMatches = (cvText||'').match(/\b\d+[%+]?\b/g) || [];
+  const quantPoints = Math.min(quantMatches.length, 5) / 5 * 8;
+
+  const hasEmail = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i.test(cvText||'');
+  const hasPhone = /\+?\d[\d\s\-\(\)]{7,}\d/.test(cvText||'');
+  const hasTablesOrBars = /\|.*\|/.test(cvText||'');
+  let formatPoints = (hasEmail ? 3 : 0) + (hasPhone ? 2 : 0) + (hasTablesOrBars ? 0 : 2);
+
+  const wordCount = (cvText||'').trim().split(/\s+/).filter(Boolean).length;
+  const lengthPoints = (wordCount >= 250 && wordCount <= 1300) ? 3 : (wordCount > 0 ? 1 : 0);
+
+  const total = Math.round(kwPoints + sectionPoints + quantPoints + formatPoints + lengthPoints);
+  return { score: Math.max(0, Math.min(100, total)), matched, missing, targetKeywords };
+}
+
+function renderAtsScore(result){
+  const block = document.getElementById('atsBlock');
+  const ring = document.getElementById('atsRing');
+  const kwWrap = document.getElementById('atsKwWrap');
+  const sub = document.getElementById('atsSub');
+  block.style.display = 'flex';
+  ring.textContent = result.score;
+  ring.className = 'ats-score-ring ' + (result.score >= 80 ? 'good' : result.score >= 60 ? 'mid' : 'low');
+  sub.textContent = result.score >= 80
+    ? 'Strong keyword and structure match — this should clear most ATS filters cleanly.'
+    : 'Below the 80 target. Weave the missing terms below into your CV where truthfully applicable.';
+  kwWrap.innerHTML =
+    result.matched.map(k=>`<span class="kw-tag matched">✓ ${escapeHtml(k)}</span>`).join('') +
+    result.missing.map(k=>`<span class="kw-tag missing">${escapeHtml(k)}</span>`).join('');
+
+  // Show warning if score is below 80
+  const warningBlock = document.getElementById('atsWarning');
+  if(result.score < 80){
+    if(!warningBlock){
+      const warning = document.createElement('div');
+      warning.id = 'atsWarning';
+      warning.className = 'ats-warning';
+      warning.innerHTML = `
+        <div class="icon">⚠️</div>
+        <div class="content">
+          <div>ATS Score Below Target (${result.score}/100)</div>
+          <div>This CV may not clear automated screening. Consider editing the CV to include more of the missing keywords naturally, or click "rescore edits" after making changes. You can still download anyway, but keep this in mind.</div>
+        </div>
+      `;
+      block.parentElement.insertBefore(warning, block);
+    }
+  } else {
+    if(warningBlock) warningBlock.remove();
+  }
+}
+
+// ---------- PDF generation ----------
+// ATS-safe formatting: single column, real selectable text (no tables/images/columns),
+// standard fonts, professional visual hierarchy for HR readability.
+function renderResumePdf(rawText, atsResult){
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  const margin = 52;
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const usableWidth = pageWidth - margin * 2;
+  let y = margin;
+
+  function ensureSpace(needed){
+    if(y + needed > pageHeight - margin - 20){ doc.addPage(); y = margin; }
+  }
+
+  // ---- CV Content ----
+  const lines = (rawText || '').split('\n');
+  let sawName = false;
+  let contactLineRendered = false;
+  let afterHeader = false; // track if we just rendered a section header
+
+  lines.forEach((rawLine)=>{
+    const line = rawLine.trim();
+    if(line === ''){
+      if(y > margin + 40 && !afterHeader) y += 4;
+      afterHeader = false;
+      return;
+    }
+
+    afterHeader = false;
+
+    // H1 -> Name (large, bold, centered, with bottom line)
+    if(/^#\s+/.test(line)){
+      const content = line.replace(/^#\s+/, '').replace(/\*\*/g, '');
+      ensureSpace(32);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(20);
+      doc.setTextColor(25, 25, 25);
+      doc.text(content, pageWidth / 2, y, { align: 'center' });
+      y += 24;
+      sawName = true;
+      return;
+    }
+
+    // Contact line detection — email or phone, short line, centered
+    if(!contactLineRendered && sawName && line.length < 150 &&
+       (/\S+@\S+\.\S+/.test(line) || /\+?\d[\d\s\-()]{6,}/.test(line))){
+      ensureSpace(14);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(80, 80, 80);
+      const contactText = line.replace(/\*\*/g, '');
+      const contactWrapped = doc.splitTextToSize(contactText, usableWidth - 40);
+      contactWrapped.forEach((cl) => {
+        doc.text(cl, pageWidth / 2, y, { align: 'center' });
+        y += 11;
+      });
+      contactLineRendered = true;
+      // Subtle divider below contact
+      y += 6;
+      doc.setDrawColor(200, 200, 200);
+      doc.setLineWidth(0.5);
+      doc.line(margin + 40, y, pageWidth - margin - 40, y);
+      y += 10;
+      return;
+    }
+
+    // H2 -> Section Header (bold, dark, with full-width underline)
+    if(/^##\s+/.test(line)){
+      const content = line.replace(/^##\s+/, '').replace(/\*\*/g, '').toUpperCase();
+      ensureSpace(24);
+      y += 8; // space before section
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10.5);
+      doc.setTextColor(30, 60, 55);
+      doc.text(content, margin, y);
+
+      // Full-width underline
+      doc.setDrawColor(30, 60, 55);
+      doc.setLineWidth(0.6);
+      doc.line(margin, y + 4, pageWidth - margin, y + 4);
+
+      y += 16;
+      afterHeader = true;
+      return;
+    }
+
+    // H3 -> Job title / company with dates (bold, slightly larger)
+    if(/^###\s+/.test(line)){
+      let content = line.replace(/^###\s+/, '').replace(/\*\*/g, '');
+      ensureSpace(16);
+      y += 2;
+
+      // Try to split "Title at Company (Date)" pattern and right-align date
+      const dateMatch = content.match(/^(.+?)\s*\(([^)]+)\)\s*$/);
+      if(dateMatch){
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10);
+        doc.setTextColor(25, 25, 25);
+        doc.text(dateMatch[1], margin, y);
+        // Date right-aligned
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor(100, 100, 100);
+        doc.text(dateMatch[2], pageWidth - margin, y, { align: 'right' });
+      } else {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10);
+        doc.setTextColor(25, 25, 25);
+        const wrapped = doc.splitTextToSize(content, usableWidth);
+        wrapped.forEach((wl, idx) => {
+          if(idx > 0){ y += 12; ensureSpace(12); }
+          doc.text(wl, margin, y);
+        });
+      }
+      y += 14;
+      return;
+    }
+
+    // Bullet points
+    if(/^[-*]\s+/.test(line)){
+      const content = line.replace(/^[-*]\s+/, '').replace(/\*\*/g, '');
+      ensureSpace(12);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9.5);
+      doc.setTextColor(35, 35, 35);
+
+      // Bullet character
+      doc.text('•', margin + 6, y);
+
+      const bulletWrapped = doc.splitTextToSize(content, usableWidth - 22);
+      bulletWrapped.forEach((bullet, idx) => {
+        if(idx > 0){ y += 11; ensureSpace(11); }
+        doc.text(bullet, margin + 18, y);
+      });
+      y += 12;
+      return;
+    }
+
+    // Plain text that looks like a job title line (contains date patterns like "Sep '22" or "Dec 2021")
+    // Render as bold job title with date handling
+    const jobTitlePattern = /^(.+?)\s+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s']*\d{2,4}\s*[-–]\s*(?:Present|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s']*\d{2,4}))\s*$/i;
+    const jtMatch = line.replace(/\*\*/g, '').match(jobTitlePattern);
+    if(jtMatch){
+      ensureSpace(16);
+      y += 2;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor(25, 25, 25);
+      doc.text(jtMatch[1].trim(), margin, y);
+      // Date right-aligned
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(100, 100, 100);
+      doc.text(jtMatch[2].trim(), pageWidth - margin, y, { align: 'right' });
+      y += 14;
+      return;
+    }
+
+    // Plain text / paragraphs — properly wrapped
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9.5);
+    doc.setTextColor(40, 40, 40);
+    const plainText = line.replace(/\*\*/g, '');
+    const wrappedLines = doc.splitTextToSize(plainText, usableWidth);
+    wrappedLines.forEach((wl) => {
+      ensureSpace(12);
+      doc.text(wl, margin, y);
+      y += 11;
+    });
+  });
+
+  return doc;
+}
+
+function buildPdfBlobUrl(rawText, atsResult){
+  const doc = renderResumePdf(rawText, atsResult);
+  const blob = doc.output('blob');
+  return URL.createObjectURL(blob);
+}
+
+function offerPdfDownload(rawText, title, kind, atsResult){
+  if(!rawText || !rawText.trim()){ toast('Nothing to export yet.', true); return; }
+  let url;
+  try{
+    url = buildPdfBlobUrl(rawText, atsResult);
+  }catch(err){
+    console.error(err);
+    toast('Could not generate the PDF — try again.', true);
+    return;
+  }
+  const filename = title.endsWith('.pdf') ? title : title + '.pdf';
+
+  // best-effort auto-download (works in a normal tab; may be blocked inside a sandboxed preview)
+  try{
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }catch(e){ console.error('auto-download blocked, falling back to manual link', e); }
+
+  // always surface a manual, always-working link — this is the reliable path inside artifact previews
+  const wrap = document.getElementById('pdfLinks');
+  const existingId = 'pdflink-' + kind;
+  const existing = document.getElementById(existingId);
+  if(existing) existing.remove();
+  const link = document.createElement('a');
+  link.id = existingId;
+  link.href = url;
+  link.target = '_blank';
+  link.rel = 'noopener';
+  link.className = 'link';
+  link.textContent = `↗ open ${filename}`;
+  link.style.display = 'inline-block';
+  link.style.marginRight = '16px';
+  link.style.fontFamily = 'var(--mono)';
+  link.style.fontSize = '12px';
+  wrap.appendChild(link);
+  toast('PDF ready — click the link below if the download didn\'t start.');
+}
+
+document.getElementById('downloadCvBtn').addEventListener('click', ()=>{
+  if(!currentPackage) return;
+  const name = `CV_${(currentPackage.company||'Application').replace(/[^a-z0-9]/gi,'_')}`;
+  offerPdfDownload(currentPackage.tailoredCV, name, 'cv', currentPackage.atsResult);
+});
+document.getElementById('downloadCoverBtn').addEventListener('click', ()=>{
+  if(!currentPackage) return;
+  const name = `CoverLetter_${(currentPackage.company||'Application').replace(/[^a-z0-9]/gi,'_')}`;
+  offerPdfDownload(currentPackage.coverLetter, name, 'cover', null);
+});
+
+// ---------- log application into pipeline ----------
+document.getElementById('logApplicationBtn').addEventListener('click', async ()=>{
+  if(!currentPackage) return;
+  const entry = {
+    id: uid(),
+    company: currentPackage.company || 'Unknown Company',
+    role: currentPackage.role || 'Unknown Role',
+    jd: currentPackage.jd,
+    dateApplied: new Date().toISOString().slice(0,10),
+    status: 'Applied',
+    followUpDate: '',
+    notes: '',
+    tailoredCV: currentPackage.tailoredCV,
+    coverLetter: currentPackage.coverLetter,
+    emailDraft: currentPackage.emailDraft,
+    skills: currentPackage.skills,
+    atsScore: currentPackage.atsResult ? currentPackage.atsResult.score : null,
+    baseCvVersion: baseCvTimestamp || 'unknown'
+  };
+  applications.unshift(entry);
+  const result = await sset('app-log', JSON.stringify(applications));
+  if(result){
+    toast('Logged to pipeline ✓');
+  } else {
+    applications.shift();
+    toast('Could not save to pipeline — try again.', true);
+  }
+  renderPipeline();
+});
+
+document.getElementById('addManualBtn').addEventListener('click', async ()=>{
+  const entry = {
+    id: uid(), company: 'New Company', role: 'Role', jd: '',
+    dateApplied: new Date().toISOString().slice(0,10), status: 'Applied',
+    followUpDate: '', notes: '', tailoredCV:'', coverLetter:'', emailDraft:'', skills: []
+  };
+  applications.unshift(entry);
+  const result = await sset('app-log', JSON.stringify(applications));
+  if(!result){ applications.shift(); toast('Could not add row — try again.', true); }
+  renderPipeline();
+});
+
+// ---------- PIPELINE VIEW ----------
+const STATUSES = ['Applied','Screening','Interview','Offer','Rejected','Ghosted'];
+
+function renderStats(){
+  const total = applications.length;
+  const active = applications.filter(a=> !['Rejected','Ghosted'].includes(a.status)).length;
+  const interviews = applications.filter(a=> a.status === 'Interview' || a.status === 'Offer').length;
+  const dueFollowups = applications.filter(a=> a.followUpDate && a.followUpDate <= new Date().toISOString().slice(0,10) && !['Rejected','Ghosted'].includes(a.status)).length;
+
+  document.getElementById('statRow').innerHTML = `
+    <div class="stat"><div class="num">${total}</div><div class="lbl">Total applications</div></div>
+    <div class="stat"><div class="num">${active}</div><div class="lbl">Active</div></div>
+    <div class="stat"><div class="num">${interviews}</div><div class="lbl">In interview / offer</div></div>
+    <div class="stat"><div class="num" style="color:${dueFollowups>0?'var(--red)':'var(--text)'}">${dueFollowups}</div><div class="lbl">Follow-ups due</div></div>
+  `;
+}
+
+function renderPipeline(){
+  renderStats();
+  const wrap = document.getElementById('pipelineTableWrap');
+  if(applications.length === 0){
+    wrap.innerHTML = `<div class="empty"><div class="glyph">∅</div>No applications logged yet.<br>Generate a package in Deploy, or add one manually.</div>`;
+    return;
+  }
+  const today = new Date().toISOString().slice(0,10);
+  wrap.innerHTML = `
+    <table>
+      <thead><tr>
+        <th>Company</th><th>Role</th><th>ATS</th><th>Applied</th><th>Status</th><th>Follow-up</th><th>Notes</th><th></th>
+      </tr></thead>
+      <tbody>
+        ${applications.map(a=>`
+          <tr data-id="${a.id}">
+            <td><input type="text" class="field-inline" data-f="company" value="${escapeAttr(a.company)}" style="background:none;border:none;color:var(--text);font-size:13px;width:120px;"></td>
+            <td><input type="text" class="field-inline" data-f="role" value="${escapeAttr(a.role)}" style="background:none;border:none;color:var(--text);font-size:13px;width:140px;"></td>
+            <td>${a.atsScore != null ? `<span class="badge" style="background:${a.atsScore>=80?'rgba(74,222,128,.12)':a.atsScore>=60?'rgba(245,166,35,.12)':'rgba(242,84,91,.1)'};color:${a.atsScore>=80?'var(--green)':a.atsScore>=60?'var(--amber)':'var(--red)'};">${a.atsScore}</span>` : '<span style="color:var(--muted);font-size:12px;">—</span>'}</td>
+            <td><input type="date" class="field-inline" data-f="dateApplied" value="${a.dateApplied}" style="background:none;border:none;color:var(--muted);font-family:var(--mono);font-size:11.5px;width:120px;"></td>
+            <td>
+              <select class="field-inline" data-f="status" style="background:var(--panel-2);width:auto;font-size:11.5px;">
+                ${STATUSES.map(s=>`<option value="${s}" ${a.status===s?'selected':''}>${s}</option>`).join('')}
+              </select>
+            </td>
+            <td>
+              <input type="date" class="field-inline" data-f="followUpDate" value="${a.followUpDate||''}" style="background:none;border:none;color:${a.followUpDate && a.followUpDate<=today?'var(--red)':'var(--muted)'};font-family:var(--mono);font-size:11.5px;width:120px;">
+            </td>
+            <td><input type="text" class="field-inline" data-f="notes" value="${escapeAttr(a.notes)}" placeholder="—" style="background:none;border:none;color:var(--muted);font-size:12.5px;width:140px;"></td>
+            <td><button class="icon-btn del-app" title="delete">✕</button></td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+
+  wrap.querySelectorAll('.field-inline').forEach(el=>{
+    el.addEventListener('change', async (e)=>{
+      const id = e.target.closest('tr').dataset.id;
+      const app = applications.find(a=> a.id === id);
+      if(!app) return;
+      const field = e.target.dataset.f;
+      const prevVal = app[field];
+      app[field] = e.target.value;
+      const result = await sset('app-log', JSON.stringify(applications));
+      if(!result){ app[field] = prevVal; e.target.value = prevVal; toast('Change not saved — try again.', true); }
+      renderStats();
+    });
+  });
+  wrap.querySelectorAll('.del-app').forEach(btn=>{
+    btn.addEventListener('click', async (e)=>{
+      const id = e.target.closest('tr').dataset.id;
+      const prevApplications = applications;
+      applications = applications.filter(a=> a.id !== id);
+      const result = await sset('app-log', JSON.stringify(applications));
+      if(!result){ applications = prevApplications; toast('Could not delete — try again.', true); }
+      renderPipeline();
+      renderRunbookSelectors();
+    });
+  });
+}
+
+function escapeAttr(s){ return (s||'').replace(/"/g,'&quot;'); }
+
+// ---------- RUNBOOK VIEW ----------
+function roleKey(company, role){ return `${company} — ${role}`; }
+
+function renderRunbookSelectors(){
+  const roleSelect = document.getElementById('qRoleSelect');
+  const filterSelect = document.getElementById('qFilterSelect');
+  const keys = [...new Set(applications.map(a=> roleKey(a.company, a.role)))];
+
+  roleSelect.innerHTML = '<option value="">— select from pipeline —</option>' +
+    keys.map(k=>`<option value="${escapeAttr(k)}">${escapeHtml(k)}</option>`).join('');
+
+  const runbookKeys = Object.keys(runbook);
+  filterSelect.innerHTML = '<option value="">all roles</option>' +
+    runbookKeys.map(k=>`<option value="${escapeAttr(k)}">${escapeHtml(k)}</option>`).join('');
+}
+
+document.getElementById('addQBtn').addEventListener('click', async ()=>{
+  const fromSelect = document.getElementById('qRoleSelect').value;
+  const custom = document.getElementById('qRoleCustom').value.trim();
+  const key = custom || fromSelect;
+  const qText = document.getElementById('qText').value.trim();
+  const qNotes = document.getElementById('qNotes').value.trim();
+  const qType = document.getElementById('qType').value;
+  const qRound = document.getElementById('qRound').value.trim();
+  const qOutcome = document.getElementById('qOutcome').value;
+
+  if(!key){ toast('Pick a role or type one in.', true); return; }
+  if(!qText){ toast('Enter the question that was asked.', true); return; }
+
+  if(!runbook[key]) runbook[key] = [];
+  const newQ = {
+    id: uid(),
+    question: qText,
+    notes: qNotes,
+    type: qType,
+    round: qRound,
+    outcome: qOutcome,
+    date: new Date().toISOString().slice(0,10)
+  };
+  runbook[key].unshift(newQ);
+  const result = await sset('runbook', JSON.stringify(runbook));
+  if(!result){
+    runbook[key] = runbook[key].filter(q=> q.id !== newQ.id);
+    if(runbook[key].length === 0) delete runbook[key];
+    toast('Could not save — try again.', true);
+    return;
+  }
+
+  document.getElementById('qText').value = '';
+  document.getElementById('qNotes').value = '';
+  document.getElementById('qRoleCustom').value = '';
+  document.getElementById('qRound').value = '';
+  document.getElementById('qOutcome').value = '';
+  document.getElementById('qType').value = 'technical';
+  toast('Added to runbook ✓');
+  renderRunbookSelectors();
+  renderQuestions();
+});
+
+document.getElementById('qFilterSelect').addEventListener('change', renderQuestions);
+
+function renderQuestions(){
+  const filter = document.getElementById('qFilterSelect').value;
+  const wrap = document.getElementById('questionsWrap');
+  const keys = filter ? [filter] : Object.keys(runbook);
+
+  if(keys.length === 0 || keys.every(k=> !runbook[k] || runbook[k].length===0)){
+    wrap.innerHTML = `<div class="empty"><div class="glyph">?</div>No interview questions logged yet.</div>`;
+    return;
+  }
+
+  const typeLabel = {technical:'Tech',behavioral:'Behavioral',systemdesign:'System Design',leadership:'Leadership',other:'Other'};
+  const outcomeColor = {strong:'var(--green)',okay:'var(--amber)',weak:'var(--red)','follow-up':'var(--teal)','':'var(--muted)'};
+
+  wrap.innerHTML = keys.filter(k=> runbook[k] && runbook[k].length).map(k=>`
+    <div style="margin-bottom:18px;">
+      <div style="font-family:var(--mono);font-size:11.5px;color:var(--amber);margin-bottom:8px;">${escapeHtml(k)}</div>
+      ${runbook[k].map(q=>`
+        <div class="q-item" data-key="${escapeAttr(k)}" data-qid="${q.id}">
+          <div class="q-meta">
+            <span style="display:flex;align-items:center;gap:8px;">
+              <span style="font-size:10.5px;color:var(--teal);">▪</span>
+              <span>${q.date}</span>
+              ${q.type ? `<span style="font-family:var(--mono);font-size:9.5px;background:rgba(45,212,191,.1);color:var(--teal);padding:2px 6px;border-radius:3px;">${typeLabel[q.type]}</span>` : ''}
+              ${q.round ? `<span style="font-family:var(--mono);font-size:9.5px;color:var(--muted);">${escapeHtml(q.round)}</span>` : ''}
+              ${q.outcome ? `<span style="font-family:var(--mono);font-size:9.5px;color:${outcomeColor[q.outcome]};font-weight:600;">${q.outcome.toUpperCase()}</span>` : ''}
+            </span>
+            <button class="icon-btn del-q">✕</button>
+          </div>
+          <div class="q-text">${escapeHtml(q.question)}</div>
+          ${q.notes ? `<div class="q-notes">${escapeHtml(q.notes)}</div>` : ''}
+        </div>
+      `).join('')}
+    </div>
+  `).join('');
+
+  wrap.querySelectorAll('.del-q').forEach(btn=>{
+    btn.addEventListener('click', async (e)=>{
+      const item = e.target.closest('.q-item');
+      const key = item.dataset.key, qid = item.dataset.qid;
+      const prevRunbook = JSON.parse(JSON.stringify(runbook));
+      runbook[key] = (runbook[key]||[]).filter(q=> q.id !== qid);
+      if(runbook[key].length === 0) delete runbook[key];
+      const result = await sset('runbook', JSON.stringify(runbook));
+      if(!result){ runbook = prevRunbook; toast('Could not delete — try again.', true); }
+      renderRunbookSelectors();
+      renderQuestions();
+    });
+  });
+}
+</script>
+</body>
+</html>
