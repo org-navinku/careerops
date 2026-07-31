@@ -25,6 +25,24 @@ CareerOps is a local-first career management system that helps you:
 
 ---
 
+## Prerequisites (Updated)
+
+### For Interview Recording Features
+- **Whisper AI** (for audio transcription) — installed via `pip install openai-whisper`
+- **FFmpeg** (for audio processing) — [install from ffmpeg.org](https://ffmpeg.org/download.html)
+
+Install Whisper:
+```bash
+pip install openai-whisper
+```
+
+Verify FFmpeg is available:
+```bash
+ffmpeg -version
+```
+
+---
+
 ## Installation (5 minutes)
 
 ### 1. Navigate to the project
@@ -107,6 +125,45 @@ http://localhost:8000/careerops.html
 
 ---
 
+## Interview Recording Workflow
+
+### 🎙️ Recording Your Interviews
+1. Use any recording app (built into your phone, Zoom, QuickTime, etc.)
+2. Record the interview naturally
+3. Save as MP3, WAV, M4A, or any audio format
+
+### 📝 Auto-Extract Questions & Answers
+1. Go to **Runbook tab**
+2. Scroll down to **"Auto-extract from recording"**
+3. **Drag-and-drop** your recording or click to browse
+4. CareerOps will:
+   - Transcribe the entire interview using Whisper AI
+   - Extract Q&A pairs automatically
+   - Detect question type (technical, behavioral, etc.)
+   - Show all extracted pairs for review
+
+### ✏️ Review & Refine
+- Edit any extracted question or answer
+- Toggle checkboxes to select which ones to keep
+- Change question type if auto-detection was wrong
+
+### 💡 Get Better Answer Suggestions
+1. Select the questions you want feedback on
+2. Click **"Get better answer suggestions"**
+3. LLM coach will:
+   - Analyze your answers
+   - Highlight what went well
+   - Suggest improvements
+   - Provide a better/more complete answer
+
+### 📚 Save to Runbook
+1. Pick the company/role
+2. Click **"Import selected to runbook"**
+3. All imported questions saved with your answers
+4. Review feedback anytime before next round
+
+---
+
 ## Features in Detail
 
 ### ✅ **CV Upload (PDF or DOCX)**
@@ -135,6 +192,11 @@ http://localhost:8000/careerops.html
 - Your answer and notes field
 - Outcome tracking (strong, okay, weak, follow-up)
 - Filter and browse by company/role
+- **Upload interview recordings** (MP3, WAV, M4A)
+- **Auto-transcribe** using Whisper AI
+- **Extract Q&A pairs** automatically from transcript
+- **Get better answer suggestions** from LLM coach
+- **Save suggestions** with questions for future reference
 
 ### ✅ **Data Persistence**
 - All data stored in browser's **localStorage** (survives browser restart)
@@ -181,6 +243,37 @@ Should show: `🚀 Backend running on http://localhost:5000`
 ### CV generation slow
 **Reason:** LLM is processing (can take 30-60 seconds)
 **Solution:** Be patient, it's thinking. First run of a model may be slower.
+
+### "Whisper not installed" error
+**Solution:** Install Whisper:
+```bash
+source venv/bin/activate
+pip install openai-whisper
+```
+First run will download the model (~140MB) — be patient.
+
+### Transcription fails or is very slow
+**Reason:** Whisper model not downloaded yet, or FFmpeg missing
+**Solution:**
+1. Ensure FFmpeg is installed: `ffmpeg -version`
+2. On Mac: `brew install ffmpeg`
+3. On Ubuntu: `sudo apt-get install ffmpeg`
+4. First transcription downloads the model (~140MB)
+
+### Q&A extraction produces no results
+**Reason:** Interview was too long/complex or audio quality was poor
+**Solution:**
+- Check the transcription is readable (visible above extracted Q&A)
+- For long interviews (>1 hour), Whisper may lose accuracy
+- Try shorter recordings or clearer audio
+- Manually add questions if auto-extraction fails
+
+### Suggestions don't match my answers
+**Reason:** LLM may have misunderstood or over-interpreted
+**Solution:**
+- These are suggestions, not critiques — use what's helpful
+- Consider the themes and key points suggested
+- Adapt suggestions to your own style and experience
 
 ---
 

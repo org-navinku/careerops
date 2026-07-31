@@ -233,6 +233,51 @@ def extract_docx():
             'error': f'Failed to read DOCX: {str(e)}'
         }), 500
 
+@app.route('/api/transcribe', methods=['POST'])
+def transcribe():
+    try:
+        import whisper
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+
+        file = request.files['file']
+        if not file.filename:
+            return jsonify({'error': 'No file selected'}), 400
+
+        # Save temp file
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix='.audio', delete=False) as tmp:
+            file.save(tmp.name)
+            tmp_path = tmp.name
+
+        try:
+            # Load Whisper model (base model, ~140MB)
+            model = whisper.load_model('base')
+            result = model.transcribe(tmp_path, language='en')
+            transcription = result['text']
+
+            os.unlink(tmp_path)
+
+            return jsonify({
+                'transcription': transcription,
+                'language': result.get('language', 'en')
+            })
+        except Exception as e:
+            os.unlink(tmp_path)
+            raise e
+
+    except ImportError:
+        return jsonify({
+            'error': 'Whisper not installed',
+            'hint': 'Install with: pip install openai-whisper'
+        }), 501
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'trace': traceback.format_exc()
+        }), 500
+
 @app.route('/api/generate', methods=['POST'])
 def generate():
     try:

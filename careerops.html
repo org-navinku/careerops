@@ -296,6 +296,32 @@
     </div>
 
     <div class="panel">
+      <div class="panel-title">Auto-extract from recording</div>
+      <div class="field">
+        <label>Upload interview recording (MP3, WAV, M4A)</label>
+        <div class="upload-zone" id="recordingZone">
+          <input type="file" id="recordingInput" accept="audio/*,.mp3,.wav,.m4a" style="display:none;">
+          <span id="recordingZoneText">Drop a recording here or <span class="link-inline">click to browse</span></span>
+        </div>
+        <div id="recordingStatus" class="muted-note"></div>
+      </div>
+      <div id="transcriptionResult" style="display:none;">
+        <div class="field">
+          <label>Transcription</label>
+          <div class="result-content" id="transcriptionText" style="max-height:200px;"></div>
+        </div>
+        <div class="field">
+          <label>Extracted questions & answers</label>
+          <div id="extractedQA" style="background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:12px;max-height:300px;overflow:auto;"></div>
+        </div>
+        <div class="btn-row">
+          <button class="btn primary" id="importQABtn">Import selected to runbook</button>
+          <button class="btn" id="getSuggestionsBtn">Get better answer suggestions</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
       <div class="panel-title">
         Browse
         <select id="qFilterSelect" style="width:auto;font-family:var(--mono);font-size:11.5px;"><option value="">all roles</option></select>
@@ -1620,6 +1646,227 @@ function renderPipeline(){
 }
 
 function escapeAttr(s){ return (s||'').replace(/"/g,'&quot;'); }
+
+// ---------- RECORDING PROCESSING ----------
+let extractedQAData = [];
+
+const recordingZone = document.getElementById('recordingZone');
+const recordingInput = document.getElementById('recordingInput');
+recordingZone.addEventListener('click', ()=> recordingInput.click());
+recordingInput.addEventListener('change', (e)=> handleRecordingFile(e.target.files[0]));
+['dragenter','dragover'].forEach(evt=>{
+  recordingZone.addEventListener(evt, (e)=>{ e.preventDefault(); recordingZone.classList.add('dragover'); });
+});
+['dragleave','drop'].forEach(evt=>{
+  recordingZone.addEventListener(evt, (e)=>{ e.preventDefault(); recordingZone.classList.remove('dragover'); });
+});
+recordingZone.addEventListener('drop', (e)=>{
+  const file = e.dataTransfer.files[0];
+  handleRecordingFile(file);
+});
+
+async function handleRecordingFile(file){
+  if(!file) return;
+  const zone = document.getElementById('recordingZone');
+  const zoneText = document.getElementById('recordingZoneText');
+  const status = document.getElementById('recordingStatus');
+  zone.classList.add('loading');
+
+  const isAudio = file.type.startsWith('audio/') || /\.(mp3|wav|m4a|ogg|webm)$/i.test(file.name);
+  if(!isAudio){
+    toast('Please upload an audio file (MP3, WAV, M4A, etc.)', true);
+    zone.classList.remove('loading');
+    return;
+  }
+
+  zoneText.innerHTML = '<span class="spinner" style="display:inline-block;vertical-align:middle;"></span> transcribing audio...';
+  try{
+    const formData = new FormData();
+    formData.append('file', file);
+    const r = await fetch('http://localhost:5001/api/transcribe', {
+      method: 'POST',
+      body: formData
+    });
+    if(!r.ok){ const e = await r.json(); throw new Error(e.error || 'Transcription failed'); }
+    const data = await r.json();
+
+    status.textContent = `Transcribed ${(file.size/1024/1024).toFixed(1)}MB audio. Extracting Q&A...`;
+    status.style.color = 'var(--teal)';
+
+    // Parse transcription to extract Q&A
+    await extractQAFromTranscription(data.transcription);
+    showTranscriptionResult(data.transcription);
+  }catch(err){
+    console.error(err);
+    status.textContent = `Failed to transcribe: ${err.message}`;
+    status.style.color = 'var(--red)';
+    toast('Transcription failed — make sure Whisper is installed and audio is clear.', true);
+  }finally{
+    zone.classList.remove('loading');
+    zoneText.innerHTML = 'Drop a recording here or <span class="link-inline">click to browse</span>';
+  }
+}
+
+async function extractQAFromTranscription(transcription){
+  try{
+    const systemMsg = `You are an expert at analyzing interview transcriptions. Extract all questions asked and answers given.
+Format ONLY as JSON: {"items":[{"question":"q","answer":"a","type":"technical|behavioral|systemdesign|leadership|other"}]}
+Be concise. Include only clear Q&A pairs.`;
+
+    const userMsg = `Interview transcription:\n\n${transcription}`;
+    const result = await callLlm(userMsg, systemMsg, 4000);
+
+    if(result.items && Array.isArray(result.items)){
+      extractedQAData = result.items.map(item=>({
+        ...item,
+        id: uid(),
+        selected: true
+      }));
+    } else {
+      throw new Error('Invalid response format');
+    }
+  }catch(err){
+    console.warn('Q&A extraction failed, will render manual:', err);
+    extractedQAData = [];
+  }
+}
+
+function showTranscriptionResult(transcription){
+  document.getElementById('transcriptionText').textContent = transcription;
+  renderExtractedQA();
+  document.getElementById('transcriptionResult').style.display = 'block';
+}
+
+function renderExtractedQA(){
+  const wrap = document.getElementById('extractedQA');
+  if(extractedQAData.length === 0){
+    wrap.innerHTML = '<div class="muted-note">No questions extracted. Edit transcription above or add manually.</div>';
+    return;
+  }
+  wrap.innerHTML = extractedQAData.map((item, idx)=>`
+    <div style="padding:10px;border-bottom:1px solid var(--line);margin-bottom:8px;">
+      <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;">
+        <input type="checkbox" data-idx="${idx}" class="qa-checkbox" ${item.selected ? 'checked' : ''} style="margin-top:3px;">
+        <div>
+          <div style="font-weight:600;color:var(--text);margin-bottom:4px;">Q: ${escapeHtml(item.question)}</div>
+          <div style="color:var(--muted);font-size:12px;margin-bottom:4px;">A: ${escapeHtml(item.answer)}</div>
+          <select class="qa-type" data-idx="${idx}" style="width:auto;font-size:11px;background:var(--panel);border:1px solid var(--line);">
+            <option value="technical" ${item.type==='technical'?'selected':''}>Technical</option>
+            <option value="behavioral" ${item.type==='behavioral'?'selected':''}>Behavioral</option>
+            <option value="systemdesign" ${item.type==='systemdesign'?'selected':''}>System Design</option>
+            <option value="leadership" ${item.type==='leadership'?'selected':''}>Leadership</option>
+            <option value="other" ${item.type==='other'?'selected':''}>Other</option>
+          </select>
+        </div>
+      </label>
+    </div>
+  `).join('');
+
+  document.querySelectorAll('.qa-checkbox').forEach(cb=>{
+    cb.addEventListener('change', (e)=>{
+      const idx = parseInt(e.target.dataset.idx);
+      extractedQAData[idx].selected = e.target.checked;
+    });
+  });
+  document.querySelectorAll('.qa-type').forEach(sel=>{
+    sel.addEventListener('change', (e)=>{
+      const idx = parseInt(e.target.dataset.idx);
+      extractedQAData[idx].type = e.target.value;
+    });
+  });
+}
+
+document.getElementById('importQABtn').addEventListener('click', async ()=>{
+  const selected = extractedQAData.filter(item => item.selected);
+  if(selected.length === 0){ toast('Select at least one question to import.', true); return; }
+
+  const fromSelect = document.getElementById('qRoleSelect').value;
+  const custom = document.getElementById('qRoleCustom').value.trim();
+  const key = custom || fromSelect;
+
+  if(!key){ toast('Pick a company/role first.', true); return; }
+  if(!runbook[key]) runbook[key] = [];
+
+  let added = 0;
+  for(const item of selected){
+    const newQ = {
+      id: uid(),
+      question: item.question,
+      notes: item.answer || '',
+      type: item.type,
+      round: document.getElementById('qRound').value.trim() || '',
+      outcome: '',
+      date: new Date().toISOString().slice(0,10)
+    };
+    runbook[key].unshift(newQ);
+    added++;
+  }
+
+  const result = await sset('runbook', JSON.stringify(runbook));
+  if(result){
+    toast(`Imported ${added} questions to runbook ✓`);
+    document.getElementById('transcriptionResult').style.display = 'none';
+    extractedQAData = [];
+    renderRunbookSelectors();
+    renderQuestions();
+  } else {
+    toast('Could not save — try again.', true);
+  }
+});
+
+document.getElementById('getSuggestionsBtn').addEventListener('click', async ()=>{
+  const selected = extractedQAData.filter(item => item.selected);
+  if(selected.length === 0){ toast('Select questions to get suggestions.', true); return; }
+
+  const btn = document.getElementById('getSuggestionsBtn');
+  const prevText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Getting suggestions...';
+
+  try{
+    const systemMsg = `You are an expert interview coach. For each question-answer pair, provide:
+1. How well the answer addresses the question
+2. Key points that were good
+3. What could be improved
+4. A better/more complete answer
+
+Format as JSON: {"suggestions":[{"question":"q","originalAnswer":"a","feedback":"...","betterAnswer":"..."}]}`;
+
+    const userMsg = `Please review these interview answers:\n\n${
+      selected.map(item => `Q: ${item.question}\nA: ${item.answer}`).join('\n\n')
+    }`;
+
+    const result = await callLlm(userMsg, systemMsg, 3000);
+
+    if(result.suggestions && Array.isArray(result.suggestions)){
+      showSuggestions(result.suggestions, selected);
+    } else {
+      throw new Error('Invalid response format');
+    }
+  }catch(err){
+    toast(`Failed to get suggestions: ${err.message}`, true);
+  }finally{
+    btn.disabled = false;
+    btn.textContent = prevText;
+  }
+});
+
+function showSuggestions(suggestions, selected){
+  const wrap = document.getElementById('extractedQA');
+  wrap.innerHTML = '<div style="background:rgba(45,212,191,.1);border:1px solid var(--teal);border-radius:8px;padding:16px;">' +
+    suggestions.map(s => `
+      <div style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--line);">
+        <div style="font-weight:600;color:var(--teal);margin-bottom:8px;">Q: ${escapeHtml(s.question)}</div>
+        <div style="color:var(--amber);font-size:12px;margin-bottom:8px;">Your answer: ${escapeHtml(s.originalAnswer)}</div>
+        <div style="color:var(--muted);font-size:13px;line-height:1.6;margin-bottom:10px;"><strong>Feedback:</strong> ${escapeHtml(s.feedback)}</div>
+        <div style="background:var(--panel);border-left:3px solid var(--green);padding:10px;border-radius:4px;">
+          <div style="color:var(--green);font-size:11px;font-weight:600;margin-bottom:4px;">Better answer:</div>
+          <div style="color:var(--text);font-size:13px;line-height:1.6;">${escapeHtml(s.betterAnswer)}</div>
+        </div>
+      </div>
+    `).join('') +
+  '</div>';
+}
 
 // ---------- RUNBOOK VIEW ----------
 function roleKey(company, role){ return `${company} — ${role}`; }
