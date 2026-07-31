@@ -1709,25 +1709,53 @@ async function handleRecordingFile(file){
 
 async function extractQAFromTranscription(transcription){
   try{
-    const systemMsg = `You are an expert at analyzing interview transcriptions. Extract all questions asked and answers given.
-Format ONLY as JSON: {"items":[{"question":"q","answer":"a","type":"technical|behavioral|systemdesign|leadership|other"}]}
-Be concise. Include only clear Q&A pairs.`;
+    const systemMsg = `You are an expert at parsing interview transcripts. Extract EVERY question asked by the interviewer and the corresponding answer from the candidate.
 
-    const userMsg = `Interview transcription:\n\n${transcription}`;
-    const result = await callLlm(userMsg, systemMsg, 4000);
+RULES:
+1. Questions often start with: "Can you...", "Tell me...", "What...", "Explain...", "How...", "Why...", "Define..."
+2. Extract the full question as asked
+3. Extract the answer that immediately follows (can be multiple sentences)
+4. Categorize by type:
+   - technical: technical concepts, tools, architecture, coding
+   - behavioral: experiences, challenges, how they handled situations
+   - systemdesign: system design, architecture decisions
+   - leadership: team management, mentoring
+   - other: general questions
 
-    if(result.items && Array.isArray(result.items)){
-      extractedQAData = result.items.map(item=>({
-        ...item,
-        id: uid(),
-        selected: true
-      }));
+IMPORTANT: Extract EVERY question, even partial or unclear answers. Better to include than exclude.
+
+Return ONLY valid JSON with no extra text:
+{"items":[{"question":"Q text","answer":"A text","type":"technical|behavioral|systemdesign|leadership|other"}]}`;
+
+    const userMsg = `Interview transcript to analyze:
+
+${transcription}
+
+Extract all Q&A pairs. Return ONLY the JSON object with no other text.`;
+
+    const result = await callLlm(userMsg, systemMsg, 8000);
+
+    if(result && result.items && Array.isArray(result.items) && result.items.length > 0){
+      extractedQAData = result.items
+        .filter(item => item.question && item.question.trim().length > 3)
+        .map(item=>({
+          question: item.question.trim(),
+          answer: (item.answer || '').trim(),
+          type: item.type || 'technical',
+          id: uid(),
+          selected: true
+        }));
+
+      if(extractedQAData.length === 0){
+        throw new Error('No valid Q&A pairs extracted');
+      }
     } else {
-      throw new Error('Invalid response format');
+      throw new Error('No items in response or invalid format');
     }
   }catch(err){
-    console.warn('Q&A extraction failed, will render manual:', err);
+    console.warn('Q&A extraction failed:', err);
     extractedQAData = [];
+    toast(`Q&A extraction had issues: ${err.message}. You can manually add questions.`, true);
   }
 }
 
@@ -1740,7 +1768,16 @@ function showTranscriptionResult(transcription){
 function renderExtractedQA(){
   const wrap = document.getElementById('extractedQA');
   if(extractedQAData.length === 0){
-    wrap.innerHTML = '<div class="muted-note">No questions extracted. Edit transcription above or add manually.</div>';
+    wrap.innerHTML = `<div style="padding:12px;background:rgba(242,84,91,.1);border:1px solid var(--red);border-radius:6px;color:var(--red);">
+      <strong>No questions extracted.</strong><br/>
+      This might happen if:
+      <ul style="margin:8px 0;padding-left:20px;">
+        <li>The transcript is not a clear Q&A format</li>
+        <li>Audio quality was poor (check transcription above)</li>
+        <li>The LLM had trouble parsing the format</li>
+      </ul>
+      You can manually add questions below, or try a different recording.
+    </div>`;
     return;
   }
   wrap.innerHTML = extractedQAData.map((item, idx)=>`
