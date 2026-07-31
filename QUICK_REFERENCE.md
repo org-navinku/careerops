@@ -73,7 +73,17 @@ Filter by company to prep for next round!
 **Use when:** You want to prep for interviews  
 **What it does:** Logs every question you're asked, organized by company/role  
 **What you can do:** Filter by company, track question types, record outcomes  
-**Key feature NEW:** Color-coded badges for question type + outcome
+**Key feature NEW:** Upload recordings → Auto-extract Q&A → Get coaching suggestions  
+**Recording support:** MP3, WAV, M4A (any audio format with FFmpeg)  
+
+**NEW Recording Workflow:**
+```
+1. Upload interview recording
+2. Auto-transcribe with Whisper AI
+3. Extract Q&A pairs automatically
+4. Get AI coaching suggestions for your answers
+5. Import to runbook with coaching feedback
+```
 
 ### Tab 4: Base Profile
 **Use when:** You want to update your master CV  
@@ -123,7 +133,40 @@ Notes: [Liked my incident response...]  [✕]
 - Follow-up date turns red when due
 - Click ✕ to delete
 
-### Question Item (Tab 3) - NEW!
+### Recording Upload Zone (Tab 3) - NEW!
+```
+┌────────────────────────────────────────────────┐
+│ Drop a recording here or click to browse       │
+│ Supports: MP3, WAV, M4A, OGG, WebM             │
+└────────────────────────────────────────────────┘
+
+After upload:
+┌────────────────────────────────────────────────┐
+│ 📝 Transcription                               │
+│ [full interview transcript here...]            │
+│                                                │
+│ ✅ Extracted questions & answers               │
+│ ☑ Q: How do you debug in production?           │
+│   A: I would check logs, metrics...            │
+│ ☑ Q: Tell me about your team experience       │
+│   A: Managed 3 engineers for 2 years...        │
+│                                                │
+│ [Import to runbook] [Get better suggestions]   │
+└────────────────────────────────────────────────┘
+
+After getting suggestions:
+┌────────────────────────────────────────────────┐
+│ 💡 Coaching Suggestions                        │
+│                                                │
+│ Q: How do you debug in production?             │
+│ Your answer: I check logs, metrics...          │
+│ Feedback: Good start! Add your framework.      │
+│ Better answer: I follow 5-step process:        │
+│   1) Gather symptoms 2) Form hypothesis...     │
+└────────────────────────────────────────────────┘
+```
+
+### Question Item (Tab 3) - With Coaching
 ```
 Acme Corp — Senior DevOps Engineer
 ┌────────────────────────────────────────────────┐
@@ -132,8 +175,11 @@ Acme Corp — Senior DevOps Engineer
 │ Q: Describe your approach to troubleshooting  │
 │    latency issues in production.              │
 │                                                │
-│ > Your approach: Systematic - start with      │
-│   metrics, isolate layer, verify fix...       │
+│ > Your approach: Check logs, metrics...        │
+│                                                │
+│ 💡 Coach feedback:                             │
+│ Good diagnosis! Add framework & depth.         │
+│ Better answer: Use systematic 5-step...        │
 └────────────────────────────────────────────────┘
 
 Color legend:
@@ -141,6 +187,7 @@ Color legend:
 [STRONG] = green
 [WEAK] = red
 [OKAY] = amber
+💡 = Coaching feedback from AI coach
 ```
 
 ---
