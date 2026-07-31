@@ -175,6 +175,7 @@
     <button class="tab" data-view="pipeline"><span class="idx">02</span>Pipeline</button>
     <button class="tab" data-view="runbook"><span class="idx">03</span>Runbook</button>
     <button class="tab" data-view="profile"><span class="idx">04</span>Base Profile</button>
+    <button class="tab" data-view="settings" style="margin-left:auto;"><span class="idx">⚙</span></button>
   </div>
 
   <!-- DEPLOY VIEW -->
@@ -303,6 +304,71 @@
     </div>
   </div>
 
+  <!-- SETTINGS VIEW -->
+  <div class="view" id="view-settings">
+    <h2 class="view-title">Settings</h2>
+    <p class="view-desc">Configure LLM backend and generation settings.</p>
+
+    <div class="panel">
+      <div class="panel-title">LLM Configuration</div>
+      <div class="field">
+        <label>Backend type</label>
+        <select id="backendType">
+          <option value="ollama">Ollama (local)</option>
+          <option value="anthropic">Anthropic (Claude API)</option>
+          <option value="custom">Custom OpenAI-compatible</option>
+        </select>
+      </div>
+
+      <div id="ollamaConfig" style="display:block;">
+        <div class="field">
+          <label>Ollama base URL</label>
+          <input type="text" id="ollamaBase" placeholder="http://localhost:11434" value="http://localhost:11434">
+          <div class="muted-note">Where Ollama is running</div>
+        </div>
+        <div class="field">
+          <label>Model name</label>
+          <input type="text" id="ollamaModel" placeholder="mistral" value="mistral">
+          <div class="muted-note">Must be already pulled in Ollama</div>
+        </div>
+      </div>
+
+      <div id="anthropicConfig" style="display:none;">
+        <div class="field">
+          <label>API Key</label>
+          <input type="password" id="anthropicKey" placeholder="sk-ant-...">
+          <div class="muted-note">Stored in browser localStorage (not secure)</div>
+        </div>
+      </div>
+
+      <div id="customConfig" style="display:none;">
+        <div class="field">
+          <label>API base URL</label>
+          <input type="text" id="customBase" placeholder="http://localhost:8000/v1">
+        </div>
+        <div class="field">
+          <label>API Key (if required)</label>
+          <input type="password" id="customKey" placeholder="optional">
+        </div>
+        <div class="field">
+          <label>Model name</label>
+          <input type="text" id="customModel" placeholder="gpt-3.5-turbo">
+        </div>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn primary" id="saveSettingsBtn">Save settings</button>
+        <span id="settingsSaveStatus" class="muted-note"></span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Connection status</div>
+      <div id="healthStatus" style="font-family:var(--mono);font-size:13px;color:var(--muted);padding:12px;"></div>
+      <button class="btn" id="testConnectionBtn" style="margin-top:8px;">Test connection</button>
+    </div>
+  </div>
+
   <!-- PROFILE VIEW -->
   <div class="view" id="view-profile">
     <h2 class="view-title">Base profile</h2>
@@ -373,6 +439,14 @@ let runbook = {};        // { "company — role": [{id, question, type, round, o
 let currentPackage = null; // last generated, not yet logged
 let currentRtab = 'cv';
 
+// LLM configuration
+let llmConfig = {
+  type: 'ollama',
+  ollama: { base: 'http://localhost:11434', model: 'mistral' },
+  anthropic: { key: '' },
+  custom: { base: '', key: '', model: '' }
+};
+
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
 
 // ---------- init ----------
@@ -386,6 +460,13 @@ async function init(){
   try{ applications = JSON.parse(await sget('app-log') || '[]'); }catch(e){ applications = []; }
   try{ runbook = JSON.parse(await sget('runbook') || '{}'); }catch(e){ runbook = {}; }
 
+  // Load LLM config
+  const savedConfig = await sget('llm-config');
+  if(savedConfig){
+    try{ llmConfig = JSON.parse(savedConfig); }catch(e){ }
+  }
+  loadSettingsUI();
+
   renderPipeline();
   renderRunbookSelectors();
   renderQuestions();
@@ -398,6 +479,7 @@ async function init(){
       document.getElementById('view-'+t.dataset.view).classList.add('active');
       if(t.dataset.view === 'pipeline') renderPipeline();
       if(t.dataset.view === 'runbook'){ renderRunbookSelectors(); renderQuestions(); }
+      if(t.dataset.view === 'settings') checkHealth();
     });
   });
 }
@@ -406,6 +488,70 @@ init();
 function updateProfileStatus(){
   const el = document.getElementById('profileStatus');
   el.textContent = baseCv.trim() ? 'base profile loaded' : 'base profile not set';
+}
+
+// ---------- SETTINGS VIEW ----------
+function loadSettingsUI(){
+  document.getElementById('backendType').value = llmConfig.type;
+  document.getElementById('ollamaBase').value = llmConfig.ollama.base;
+  document.getElementById('ollamaModel').value = llmConfig.ollama.model;
+  document.getElementById('anthropicKey').value = llmConfig.anthropic.key;
+  document.getElementById('customBase').value = llmConfig.custom.base;
+  document.getElementById('customKey').value = llmConfig.custom.key;
+  document.getElementById('customModel').value = llmConfig.custom.model;
+  updateSettingsUI();
+}
+
+function updateSettingsUI(){
+  const type = document.getElementById('backendType').value;
+  document.getElementById('ollamaConfig').style.display = type === 'ollama' ? 'block' : 'none';
+  document.getElementById('anthropicConfig').style.display = type === 'anthropic' ? 'block' : 'none';
+  document.getElementById('customConfig').style.display = type === 'custom' ? 'block' : 'none';
+}
+
+document.getElementById('backendType').addEventListener('change', updateSettingsUI);
+
+document.getElementById('saveSettingsBtn').addEventListener('click', async ()=>{
+  const type = document.getElementById('backendType').value;
+  llmConfig = {
+    type,
+    ollama: { base: document.getElementById('ollamaBase').value, model: document.getElementById('ollamaModel').value },
+    anthropic: { key: document.getElementById('anthropicKey').value },
+    custom: { base: document.getElementById('customBase').value, key: document.getElementById('customKey').value, model: document.getElementById('customModel').value }
+  };
+  const result = await sset('llm-config', JSON.stringify(llmConfig));
+  const statusEl = document.getElementById('settingsSaveStatus');
+  if(result){
+    statusEl.textContent = 'saved ✓';
+    statusEl.style.color = 'var(--teal)';
+    toast('Settings saved');
+  } else {
+    statusEl.textContent = 'save failed';
+    statusEl.style.color = 'var(--red)';
+    toast('Could not save settings', true);
+  }
+  setTimeout(()=>{ statusEl.textContent = ''; statusEl.style.color = ''; }, 3000);
+});
+
+document.getElementById('testConnectionBtn').addEventListener('click', checkHealth);
+
+async function checkHealth(){
+  const statusEl = document.getElementById('healthStatus');
+  statusEl.innerHTML = '<span class="spinner" style="display:inline-block;vertical-align:middle;"></span> checking...';
+  try{
+    const endpoint = llmConfig.type === 'ollama'
+      ? `${llmConfig.ollama.base}/api/tags`
+      : llmConfig.type === 'anthropic' ? 'http://localhost:5001/api/health'
+      : `${llmConfig.custom.base}/../models`;
+    const r = await fetch(endpoint, { timeout: 5000 });
+    if(r.ok){
+      statusEl.innerHTML = `<span style="color:var(--green);">✓ Connected to ${llmConfig.type} backend</span>`;
+    } else {
+      statusEl.innerHTML = `<span style="color:var(--red);">✗ Backend returned ${r.status}</span>`;
+    }
+  }catch(err){
+    statusEl.innerHTML = `<span style="color:var(--red);">✗ Could not reach backend: ${err.message}</span>`;
+  }
 }
 
 // ---------- PROFILE VIEW ----------
@@ -790,19 +936,26 @@ function assembleCvMarkdown(parsed, llmSummary, llmRoleBullets){
 }
 
 async function callLlm(userMsg, systemMsg, maxTokens){
-  const body = { model: 'claude-sonnet-4-6', max_tokens: maxTokens, user_message: userMsg };
-  if(systemMsg) body.system = systemMsg;
-  const r = await fetch('http://localhost:5001/api/generate', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-  });
-  const d = await r.json();
-  const tb = (d.content || []).find(b => b.type === 'text');
-  if(!tb) throw new Error('No text response from model');
-  let clean = tb.text.trim().replace(/^```json/i,'').replace(/^```/,'').replace(/```$/,'').trim();
-  clean = clean.replace(/"((?:[^"\\]|\\.)*)"/g, (m, inner) => {
-    return '"' + inner.replace(/[\x00-\x1F\x7F]/g, ch => ({"\n":'\\n','\r':'\\r','\t':'\\t'}[ch]||'')) + '"';
-  });
-  return JSON.parse(clean);
+  if(llmConfig.type === 'ollama'){
+    // Use local backend that proxies to Ollama
+    const body = { model: llmConfig.ollama.model, max_tokens: maxTokens, user_message: userMsg };
+    if(systemMsg) body.system = systemMsg;
+    const r = await fetch('http://localhost:5001/api/generate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Ollama-Base': llmConfig.ollama.base }, body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    const tb = (d.content || []).find(b => b.type === 'text');
+    if(!tb) throw new Error('No text response from model');
+    let clean = tb.text.trim().replace(/^```json/i,'').replace(/^```/,'').replace(/```$/,'').trim();
+    clean = clean.replace(/"((?:[^"\\]|\\.)*)"/g, (m, inner) => {
+      return '"' + inner.replace(/[\x00-\x1F\x7F]/g, ch => ({"\n":'\\n','\r':'\\r','\t':'\\t'}[ch]||'')) + '"';
+    });
+    return JSON.parse(clean);
+  } else if(llmConfig.type === 'anthropic'){
+    throw new Error('Anthropic integration not yet implemented. Use Ollama for now.');
+  } else if(llmConfig.type === 'custom'){
+    throw new Error('Custom backend integration not yet implemented. Use Ollama for now.');
+  }
 }
 
 async function generatePackage(){

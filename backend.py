@@ -18,8 +18,11 @@ OLLAMA_BASE = os.environ.get('OLLAMA_BASE', 'http://localhost:11434')
 MODEL = os.environ.get('OLLAMA_MODEL', 'mistral')
 
 def check_ollama():
+    return check_ollama_at(OLLAMA_BASE)
+
+def check_ollama_at(base_url):
     try:
-        r = requests.get(f'{OLLAMA_BASE}/api/tags', timeout=2)
+        r = requests.get(f'{base_url}/api/tags', timeout=2)
         return r.status_code == 200
     except:
         return False
@@ -233,15 +236,19 @@ def extract_docx():
 @app.route('/api/generate', methods=['POST'])
 def generate():
     try:
-        if not check_ollama():
-            return jsonify({
-                'error': 'Ollama not running',
-                'hint': 'Start Ollama with: ollama serve'
-            }), 503
-
         data = request.json
         system = data.get('system', '')
         user_msg = data.get('user_message', '')
+        model = data.get('model', MODEL)
+
+        # Allow frontend to override Ollama base via header
+        ollama_base = request.headers.get('X-Ollama-Base', OLLAMA_BASE)
+
+        if not check_ollama_at(ollama_base):
+            return jsonify({
+                'error': 'Ollama not running',
+                'hint': f'Start Ollama with: ollama serve (at {ollama_base})'
+            }), 503
 
         # Build messages for Ollama API (OpenAI-compatible)
         messages = []
@@ -250,10 +257,10 @@ def generate():
         messages.append({'role': 'user', 'content': user_msg})
 
         response = requests.post(
-            f'{OLLAMA_BASE}/v1/chat/completions',
+            f'{ollama_base}/v1/chat/completions',
             headers={'Content-Type': 'application/json'},
             json={
-                'model': MODEL,
+                'model': model,
                 'messages': messages,
                 'temperature': 0.7,
                 'max_tokens': 12000,

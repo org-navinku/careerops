@@ -99,6 +99,12 @@ http://localhost:8000/careerops.html
 - Save changes (stored locally in browser)
 - This is your source of truth — edits don't affect past applications
 
+### **Tab 5: Settings** — Configure LLM backend
+- Choose backend type: Ollama, Anthropic (future), or custom OpenAI-compatible
+- For Ollama: set base URL and model name
+- Test connection to verify setup
+- Settings saved in browser localStorage
+
 ---
 
 ## Features in Detail
@@ -225,6 +231,25 @@ Should show: `🚀 Backend running on http://localhost:5000`
 ### Base CV Timestamp (localStorage key: `base-cv-timestamp`)
 - ISO date when profile was last saved (for version tracking)
 
+### LLM Configuration (localStorage key: `llm-config`)
+```json
+{
+  "type": "ollama",
+  "ollama": {
+    "base": "http://localhost:11434",
+    "model": "mistral"
+  },
+  "anthropic": {
+    "key": ""
+  },
+  "custom": {
+    "base": "",
+    "key": "",
+    "model": ""
+  }
+}
+```
+
 ---
 
 ## Tips & Best Practices
@@ -254,13 +279,39 @@ Should show: `🚀 Backend running on http://localhost:5000`
 
 ---
 
+## Configuring Different LLM Backends
+
+### Using Ollama (Default)
+1. Open **Settings** tab (⚙ icon)
+2. Select **Ollama (local)** from Backend type
+3. Set Ollama base URL (default: `http://localhost:11434`)
+4. Set model name (default: `mistral`)
+5. Click **Save settings**
+6. Click **Test connection** to verify
+
+### Switching Models in Ollama
+To use a different Ollama model:
+1. Pull the model: `ollama pull llama2`
+2. Go to **Settings** tab
+3. Change the "Model name" field to `llama2`
+4. Click **Save settings**
+
+### Future: Other Backends
+The settings panel is set up for future integration with:
+- **Anthropic (Claude API)** — requires API key
+- **Custom OpenAI-compatible** — any OpenAI-compatible backend (LM Studio, LocalAI, etc.)
+
+Future implementations will allow you to swap backends without code changes.
+
+---
+
 ## Limitations & Known Issues
 
 ### ⚠️ **Current Limitations**
 - **No cloud sync** — data only lives in your browser
 - **No multi-device sync** — export/import manually if you want to move data
 - **No bulk export** — runbook and applications stored as JSON in localStorage
-- **Ollama required for CV generation** — local LLM only (no cloud LLM integration)
+- **Ollama required for CV generation** — currently only Ollama is fully integrated
 - **ATS score is an estimate** — real ATS systems are proprietary; this is a good proxy
 
 ### 🐛 **Known Issues**
