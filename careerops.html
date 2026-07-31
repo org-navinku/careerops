@@ -1796,7 +1796,8 @@ document.getElementById('importQABtn').addEventListener('click', async ()=>{
       type: item.type,
       round: document.getElementById('qRound').value.trim() || '',
       outcome: '',
-      date: new Date().toISOString().slice(0,10)
+      date: new Date().toISOString().slice(0,10),
+      suggestions: item.suggestions || null
     };
     runbook[key].unshift(newQ);
     added++;
@@ -1839,6 +1840,11 @@ Format as JSON: {"suggestions":[{"question":"q","originalAnswer":"a","feedback":
     const result = await callLlm(userMsg, systemMsg, 3000);
 
     if(result.suggestions && Array.isArray(result.suggestions)){
+      // Attach suggestions to extracted QA data for later import
+      result.suggestions.forEach(sugg => {
+        const item = selected.find(s => s.question === sugg.question);
+        if(item) item.suggestions = sugg;
+      });
       showSuggestions(result.suggestions, selected);
     } else {
       throw new Error('Invalid response format');
@@ -1905,7 +1911,8 @@ document.getElementById('addQBtn').addEventListener('click', async ()=>{
     type: qType,
     round: qRound,
     outcome: qOutcome,
-    date: new Date().toISOString().slice(0,10)
+    date: new Date().toISOString().slice(0,10),
+    suggestions: null
   };
   runbook[key].unshift(newQ);
   const result = await sset('runbook', JSON.stringify(runbook));
@@ -1959,6 +1966,13 @@ function renderQuestions(){
           </div>
           <div class="q-text">${escapeHtml(q.question)}</div>
           ${q.notes ? `<div class="q-notes">${escapeHtml(q.notes)}</div>` : ''}
+          ${q.suggestions ? `
+            <div style="margin-top:8px;padding:8px;background:rgba(45,212,191,.05);border-left:2px solid var(--teal);border-radius:4px;">
+              <div style="font-size:11px;color:var(--teal);font-weight:600;margin-bottom:4px;">💡 Coach feedback:</div>
+              <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">${escapeHtml(q.suggestions.feedback)}</div>
+              <div style="font-size:11px;color:var(--green);background:var(--panel-2);padding:6px;border-radius:3px;line-height:1.5;">${escapeHtml(q.suggestions.betterAnswer)}</div>
+            </div>
+          ` : ''}
         </div>
       `).join('')}
     </div>
