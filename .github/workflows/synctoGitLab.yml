@@ -1,0 +1,38 @@
+name: Sync to GitLab
+
+on:
+  push:
+    branches:
+      - main  # Sync only when there are changes to the main branch
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Check out the GitHub repository
+      - name: Check out source repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Fetch the entire history to avoid shallow clone issues
+
+      # Step 2: Add GitLab as a remote and push changes
+      - name: Sync to GitLab
+        env:
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+          GITLAB_USERNAME: ${{ secrets.GITLAB_USERNAME }}
+          GITLAB_EMAIL: ${{ secrets.GITLAB_EMAIL }}
+          GITLAB_URL: ${{ secrets.GITLAB_URL }}
+        run: |
+          # Configure Git user
+          git config --global user.name "${GITLAB_USERNAME}"
+          git config --global user.email "${GITLAB_EMAIL}"
+
+          # Add GitLab as a remote
+          git remote add gitlab https://oauth2:${GITLAB_TOKEN}@${GITLAB_URL} || true
+          # FORMAT GITLAB_URL in Variables : gitlab.domain.com/devops/my-project-name.git
+
+          # Push to GitLab (force to ensure sync)
+          # git push --force gitlab main
+          # git push gitlab main:sync-main
+          git push gitlab main
