@@ -1862,7 +1862,7 @@ async function handleRecordingFile(file){
     console.error(err);
     status.textContent = `Failed to transcribe: ${err.message}`;
     status.style.color = 'var(--red)';
-    toast('Transcription failed — make sure Whisper is installed and audio is clear.', true);
+    toast('Transcription failed - check the API key and audio file.', true);
   }finally{
     zone.classList.remove('loading');
     zoneText.innerHTML = 'Drop a recording here or <span class="link-inline">click to browse</span>';

@@ -16,6 +16,8 @@ CORS(app)
 
 OLLAMA_BASE = os.environ.get('OLLAMA_BASE', 'http://localhost:11434')
 MODEL = os.environ.get('OLLAMA_MODEL', 'mistral')
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
+TRANSCRIPTION_MODEL = os.environ.get('OPENAI_TRANSCRIPTION_MODEL', 'gpt-4o-mini-transcribe')
 
 def check_ollama():
     return check_ollama_at(OLLAMA_BASE)
@@ -34,6 +36,8 @@ def health():
         'status': 'ok',
         'ollama': 'connected' if ollama_running else 'disconnected',
         'model': MODEL,
+        'transcription_model': TRANSCRIPTION_MODEL,
+        'transcription_api': 'configured' if OPENAI_API_KEY else 'missing_api_key',
         'docx_support': DOCX_AVAILABLE
     })
 
@@ -235,8 +239,13 @@ def extract_docx():
 
 @app.route('/api/transcribe', methods=['POST'])
 def transcribe():
+    if not OPENAI_API_KEY:
+        return jsonify({
+            'error': 'OpenAI API key not configured',
+            'hint': 'Set OPENAI_API_KEY in the backend environment'
+        }), 503
+
     try:
-        import whisper
         if 'file' not in request.files:
             return jsonify({'error': 'No file provided'}), 400
 
@@ -244,33 +253,47 @@ def transcribe():
         if not file.filename:
             return jsonify({'error': 'No file selected'}), 400
 
-        # Save temp file
-        import tempfile
-        with tempfile.NamedTemporaryFile(suffix='.audio', delete=False) as tmp:
-            file.save(tmp.name)
-            tmp_path = tmp.name
+        files = {
+            'file': (
+                file.filename,
+                file.stream,
+                file.mimetype or 'application/octet-stream'
+            )
+        }
+        data = {
+            'model': TRANSCRIPTION_MODEL,
+            'language': 'en',
+            'response_format': 'json'
+        }
+        headers = {
+            'Authorization': f'Bearer {OPENAI_API_KEY}'
+        }
 
-        try:
-            # Load Whisper model (base model, ~140MB)
-            model = whisper.load_model('base')
-            result = model.transcribe(tmp_path, language='en')
-            transcription = result['text']
+        response = requests.post(
+            'https://api.openai.com/v1/audio/transcriptions',
+            headers=headers,
+            files=files,
+            data=data,
+            timeout=120
+        )
 
-            os.unlink(tmp_path)
-
+        if response.status_code >= 400:
+            try:
+                detail = response.json()
+            except ValueError:
+                detail = response.text
             return jsonify({
-                'transcription': transcription,
-                'language': result.get('language', 'en')
-            })
-        except Exception as e:
-            os.unlink(tmp_path)
-            raise e
+                'error': 'Transcription API request failed',
+                'detail': detail
+            }), response.status_code
 
-    except ImportError:
+        result = response.json()
         return jsonify({
-            'error': 'Whisper not installed',
-            'hint': 'Install with: pip install openai-whisper'
-        }), 501
+            'transcription': result.get('text', ''),
+            'language': 'en',
+            'model': TRANSCRIPTION_MODEL,
+            'usage': result.get('usage')
+        })
     except Exception as e:
         import traceback
         return jsonify({
