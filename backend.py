@@ -25,7 +25,7 @@ MODEL = os.environ.get('OLLAMA_MODEL', 'mistral')
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 TRANSCRIPTION_MODEL = os.environ.get('OPENAI_TRANSCRIPTION_MODEL', 'gpt-4o-mini-transcribe')
 REQUIRE_OLLAMA_ON_START = os.environ.get('REQUIRE_OLLAMA_ON_START', '').lower() in ('1', 'true', 'yes')
-CAREEROPS_USERNAME = os.environ.get('CAREEROPS_USERNAME', 'careerops')
+CAREEROPS_USERNAME = os.environ.get('CAREEROPS_USERNAME', '')
 CAREEROPS_PASSWORD = os.environ.get('CAREEROPS_PASSWORD', '')
 
 def check_ollama():
