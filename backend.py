@@ -2,6 +2,7 @@
 import os
 import re
 import json
+import hmac
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import requests
@@ -24,6 +25,8 @@ MODEL = os.environ.get('OLLAMA_MODEL', 'mistral')
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 TRANSCRIPTION_MODEL = os.environ.get('OPENAI_TRANSCRIPTION_MODEL', 'gpt-4o-mini-transcribe')
 REQUIRE_OLLAMA_ON_START = os.environ.get('REQUIRE_OLLAMA_ON_START', '').lower() in ('1', 'true', 'yes')
+CAREEROPS_USERNAME = os.environ.get('CAREEROPS_USERNAME', 'careerops')
+CAREEROPS_PASSWORD = os.environ.get('CAREEROPS_PASSWORD', '')
 
 def check_ollama():
     return check_ollama_at(OLLAMA_BASE)
@@ -42,6 +45,23 @@ def resolve_ollama_base(header_base=None):
     if 'localhost' in header_base and 'localhost' not in OLLAMA_BASE:
         return OLLAMA_BASE
     return header_base
+
+@app.route('/api/login', methods=['POST'])
+def login():
+    if not CAREEROPS_PASSWORD:
+        return jsonify({'error': 'Login is not configured'}), 503
+
+    data = request.json or {}
+    username = str(data.get('username', ''))
+    password = str(data.get('password', ''))
+
+    if (
+        hmac.compare_digest(username, CAREEROPS_USERNAME)
+        and hmac.compare_digest(password, CAREEROPS_PASSWORD)
+    ):
+        return jsonify({'ok': True, 'username': username})
+
+    return jsonify({'error': 'Invalid username or password'}), 401
 
 @app.route('/api/health', methods=['GET'])
 def health():

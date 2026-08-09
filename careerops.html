@@ -215,7 +215,6 @@
 
     <div class="login-footer">
       <p>First time? <a href="#" id="signupToggle">Create account</a></p>
-      <p style="margin-top:8px;font-size:11px;color:var(--muted);">Demo: user / password</p>
     </div>
   </div>
 </div>
@@ -491,13 +490,6 @@
 <script>
 const { jsPDF } = window.jspdf;
 
-// ---------- authentication ----------
-const DEMO_USERS = {
-  'user': 'password',
-  'admin': 'admin123',
-  'demo': 'demo'
-};
-
 let currentUser = null;
 
 async function checkAuth(){
@@ -534,12 +526,19 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
   loginBtn.disabled = true;
   loginBtn.textContent = 'Signing in...';
 
-  // Simulate auth delay
-  await new Promise(r => setTimeout(r, 600));
+  try{
+    const response = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
 
-  // Check credentials
-  if(DEMO_USERS[username] && DEMO_USERS[username] === password){
-    currentUser = { username, loginTime: new Date().toISOString() };
+    const result = await response.json().catch(()=>({}));
+    if(!response.ok){
+      throw new Error(result.error || 'Invalid username or password');
+    }
+
+    currentUser = { username: result.username || username, loginTime: new Date().toISOString() };
 
     if(rememberMe){
       localStorage.setItem('careerops-user', JSON.stringify(currentUser));
@@ -550,8 +549,8 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
     document.getElementById('loginForm').reset();
     showApp();
     init();
-  } else {
-    errorEl.textContent = 'Invalid username or password';
+  }catch(err){
+    errorEl.textContent = err.message || 'Invalid username or password';
     errorEl.classList.add('show');
   }
 
@@ -561,7 +560,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e)=>{
 
 document.getElementById('signupToggle').addEventListener('click', (e)=>{
   e.preventDefault();
-  alert('In a real app, this would open a signup form.\n\nFor demo, use:\nUsername: user\nPassword: password');
+  alert('Account creation is disabled. Ask the administrator for access.');
 });
 
 // Add logout button to topbar

@@ -16,6 +16,8 @@ services:
       - OLLAMA_MODEL=mistral
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_TRANSCRIPTION_MODEL=gpt-4o-mini-transcribe
+      - CAREEROPS_USERNAME=${CAREEROPS_USERNAME}
+      - CAREEROPS_PASSWORD=${CAREEROPS_PASSWORD}
     volumes:
       - ./data:/app/data  # For persistent data
     healthcheck:
