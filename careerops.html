@@ -413,7 +413,7 @@
       <div id="ollamaConfig" style="display:block;">
         <div class="field">
           <label>Ollama base URL</label>
-          <input type="text" id="ollamaBase" placeholder="http://localhost:11434" value="http://localhost:11434">
+          <input type="text" id="ollamaBase" placeholder="server default" value="">
           <div class="muted-note">Where Ollama is running</div>
         </div>
         <div class="field">
@@ -626,7 +626,7 @@ let currentRtab = 'cv';
 // LLM configuration
 let llmConfig = {
   type: 'ollama',
-  ollama: { base: 'http://localhost:11434', model: 'mistral' },
+  ollama: { base: '', model: 'mistral' },
   anthropic: { key: '' },
   custom: { base: '', key: '', model: '' }
 };
@@ -728,8 +728,8 @@ async function checkHealth(){
   statusEl.innerHTML = '<span class="spinner" style="display:inline-block;vertical-align:middle;"></span> checking...';
   try{
     const endpoint = llmConfig.type === 'ollama'
-      ? `${llmConfig.ollama.base}/api/tags`
-      : llmConfig.type === 'anthropic' ? 'http://localhost:5001/api/health'
+      ? '/api/health'
+      : llmConfig.type === 'anthropic' ? '/api/health'
       : `${llmConfig.custom.base}/../models`;
     const r = await fetch(endpoint, { timeout: 5000 });
     if(r.ok){
@@ -824,7 +824,7 @@ async function handleCvFile(file){
 async function extractDocxText(file){
   const formData = new FormData();
   formData.append('file', file);
-  const response = await fetch('http://localhost:5001/api/extract-docx', {
+  const response = await fetch('/api/extract-docx', {
     method: 'POST',
     body: formData
   });
@@ -1128,8 +1128,10 @@ async function callLlm(userMsg, systemMsg, maxTokens){
     // Use local backend that proxies to Ollama
     const body = { model: llmConfig.ollama.model, max_tokens: maxTokens, user_message: userMsg };
     if(systemMsg) body.system = systemMsg;
-    const r = await fetch('http://localhost:5001/api/generate', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Ollama-Base': llmConfig.ollama.base }, body: JSON.stringify(body)
+    const headers = { 'Content-Type': 'application/json' };
+    if(llmConfig.ollama.base.trim()) headers['X-Ollama-Base'] = llmConfig.ollama.base.trim();
+    const r = await fetch('/api/generate', {
+      method: 'POST', headers, body: JSON.stringify(body)
     });
     const d = await r.json();
     const tb = (d.content || []).find(b => b.type === 'text');
@@ -1663,7 +1665,7 @@ document.getElementById('downloadCvBtn').addEventListener('click', async ()=>{
   if(!currentPackage) return;
   const name = `CV_${(currentPackage.company||'Application').replace(/[^a-z0-9]/gi,'_')}.docx`;
   try{
-    const r = await fetch('http://localhost:5001/api/generate-docx', {
+    const r = await fetch('/api/generate-docx', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ cv_text: currentPackage.tailoredCV })
@@ -1845,7 +1847,7 @@ async function handleRecordingFile(file){
   try{
     const formData = new FormData();
     formData.append('file', file);
-    const r = await fetch('http://localhost:5001/api/transcribe', {
+    const r = await fetch('/api/transcribe', {
       method: 'POST',
       body: formData
     });

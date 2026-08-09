@@ -14,10 +14,16 @@ except ImportError:
 app = Flask(__name__)
 CORS(app)
 
-OLLAMA_BASE = os.environ.get('OLLAMA_BASE', 'http://localhost:11434')
+OLLAMA_BASE = (
+    os.environ.get('OLLAMA_BASE')
+    or os.environ.get('OLLAMA_URL')
+    or os.environ.get('OLLAMA_HOST')
+    or 'http://localhost:11434'
+)
 MODEL = os.environ.get('OLLAMA_MODEL', 'mistral')
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 TRANSCRIPTION_MODEL = os.environ.get('OPENAI_TRANSCRIPTION_MODEL', 'gpt-4o-mini-transcribe')
+REQUIRE_OLLAMA_ON_START = os.environ.get('REQUIRE_OLLAMA_ON_START', '').lower() in ('1', 'true', 'yes')
 
 def check_ollama():
     return check_ollama_at(OLLAMA_BASE)
@@ -28,6 +34,14 @@ def check_ollama_at(base_url):
         return r.status_code == 200
     except:
         return False
+
+def resolve_ollama_base(header_base=None):
+    header_base = (header_base or '').strip()
+    if not header_base:
+        return OLLAMA_BASE
+    if 'localhost' in header_base and 'localhost' not in OLLAMA_BASE:
+        return OLLAMA_BASE
+    return header_base
 
 @app.route('/api/health', methods=['GET'])
 def health():
@@ -310,7 +324,7 @@ def generate():
         model = data.get('model', MODEL)
 
         # Allow frontend to override Ollama base via header
-        ollama_base = request.headers.get('X-Ollama-Base', OLLAMA_BASE)
+        ollama_base = resolve_ollama_base(request.headers.get('X-Ollama-Base'))
 
         if not check_ollama_at(ollama_base):
             return jsonify({
@@ -383,16 +397,17 @@ if __name__ == '__main__':
 
     print(f"🔍 Looking for Ollama at {OLLAMA_BASE}...")
     if not check_ollama():
-        print("❌ Ollama is not running!")
+        print("⚠️  Ollama is not running!")
         print("\n📦 Setup steps:")
         print("  Terminal 1: ollama serve")
         print("  Terminal 2 (this script): python3 backend.py")
         print("  Terminal 3: python3 -m http.server 8000")
         print("\nIf first time:")
         print("  ollama pull mistral")
-        exit(1)
-
-    print("✅ Ollama connected!")
+        if REQUIRE_OLLAMA_ON_START:
+            exit(1)
+    else:
+        print("✅ Ollama connected!")
     print(f"📦 Using model: {MODEL}")
     print(f"🚀 Backend running on http://localhost:{port}")
     print(f"📄 Frontend: http://localhost:8000/careerops.html")
