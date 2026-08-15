@@ -1955,6 +1955,10 @@ async function uploadCV(appId){
   const app = applications.find(a=> a.id === appId);
   if(!app) return;
 
+  // Capture the clicked button before the async file picker opens
+  const btn = document.querySelector(`[onclick="uploadCV('${appId}')"]`);
+  const originalHtml = btn ? btn.innerHTML : null;
+
   const input = document.createElement('input');
   input.type = 'file';
   input.accept = '.pdf,.docx';
@@ -1966,10 +1970,7 @@ async function uploadCV(appId){
     formData.append('file', file);
     formData.append('userId', storageUserId());
 
-    const btn = event.target;
-    const originalHtml = btn.innerHTML;
-    btn.innerHTML = '<span class="spinner" style="display:inline-block;vertical-align:middle;"></span>';
-    btn.disabled = true;
+    if(btn){ btn.innerHTML = '<span class="spinner" style="display:inline-block;vertical-align:middle;"></span>'; btn.disabled = true; }
 
     try{
       const response = await fetch(`/api/applications/${encodeURIComponent(appId)}/cv`, {
@@ -1979,15 +1980,22 @@ async function uploadCV(appId){
       const data = await response.json();
       if(!response.ok) throw new Error(data.error || 'Upload failed');
 
+      const prevFilename = app.cvFilename;
+      const prevS3Key = app.cvS3Key;
       app.cvFilename = data.filename;
       app.cvS3Key = data.s3Key;
-      await sset('app-log', JSON.stringify(applications));
+      const saved = await sset('app-log', JSON.stringify(applications));
+      if(!saved){
+        app.cvFilename = prevFilename;
+        app.cvS3Key = prevS3Key;
+        toast('CV uploaded but could not save — try again.', true);
+      } else {
+        toast('CV uploaded ✓');
+      }
       renderPipeline();
-      toast('CV uploaded ✓');
     }catch(err){
       toast(`Upload failed: ${err.message}`, true);
-      btn.innerHTML = originalHtml;
-      btn.disabled = false;
+      if(btn){ btn.innerHTML = originalHtml; btn.disabled = false; }
     }
   };
   input.click();

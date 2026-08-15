@@ -6,7 +6,7 @@ import hmac
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -98,7 +98,8 @@ def validate_cv_file(file):
         return 'No file provided'
 
     # Check extension
-    filename = file.filename
+    filename = os.path.basename(file.filename or '')
+    filename = re.sub(r'[^\w\-.]', '_', filename)
     ext = os.path.splitext(filename)[1].lower()
     if ext not in ALLOWED_EXTENSIONS:
         return f'Invalid file type. Allowed formats: {", ".join(sorted(ALLOWED_EXTENSIONS))}'
@@ -170,7 +171,7 @@ def create_application():
             'coverLetter': data.get('coverLetter', ''),
             'emailDraft': data.get('emailDraft', ''),
             'baseCvVersion': data.get('baseCvVersion', ''),
-            'timestamp': int(datetime.now().timestamp())
+            'timestamp': int(datetime.now(timezone.utc).timestamp())
         }
         
         applications_table.put_item(Item=dynamodb_safe(item))
@@ -196,7 +197,7 @@ def update_application(app_id):
         
         # Merge with new data
         item = {**existing, **data}
-        item['timestamp'] = int(datetime.now().timestamp())
+        item['timestamp'] = int(datetime.now(timezone.utc).timestamp())
         
         applications_table.put_item(Item=dynamodb_safe(item))
         return jsonify({'status': 'ok'})
@@ -256,7 +257,8 @@ def upload_cv(app_id):
         return jsonify({'error': 'Insufficient permissions'}), 403
 
     # Upload file to S3
-    filename = file.filename
+    filename = os.path.basename(file.filename or '')
+    filename = re.sub(r'[^\w\-.]', '_', filename)
     s3_key = f"{user_id}/{app_id}/{filename}"
 
     try:
@@ -431,7 +433,7 @@ def create_question():
             'notes': data.get('notes', ''),
             'date': data.get('date'),
             'suggestions': data.get('suggestions'),
-            'timestamp': int(datetime.now().timestamp())
+            'timestamp': int(datetime.now(timezone.utc).timestamp())
         }
         
         runbook_table.put_item(Item=dynamodb_safe(item))
@@ -457,7 +459,7 @@ def update_question(question_id):
         
         # Merge with new data
         item = {**existing, **data}
-        item['timestamp'] = int(datetime.now().timestamp())
+        item['timestamp'] = int(datetime.now(timezone.utc).timestamp())
         
         runbook_table.put_item(Item=dynamodb_safe(item))
         return jsonify({'status': 'ok'})
@@ -648,4 +650,6 @@ if __name__ == '__main__':
     print(f"🚀 Backend running on http://localhost:{port}")
     print(f"📄 Frontend: http://localhost:8000/careerops.html")
     print(f"✓ Health check: http://localhost:{port}/api/health")
-    app.run(host="0.0.0.0", port=port, debug=False)
+    host = os.environ.get('FLASK_HOST', '127.0.0.1')
+    debug = os.environ.get('FLASK_DEBUG', 'false').lower() in ('1', 'true', 'yes')
+    app.run(host=host, port=port, debug=debug)
