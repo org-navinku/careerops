@@ -192,10 +192,10 @@ The LLM coach reviews your answers to:
 - ✅ Interview outcome (Strong/Weak/etc.)
 
 ### Where It's Stored?
-- ✅ Browser `localStorage` (on your computer)
-- ❌ NOT in cloud
+- ✅ Saved runbook entries are stored in the DynamoDB `runbook` table
+- ✅ DynamoDB is fully managed and does not require EC2 resources
 - ❌ NOT on CareerOps servers
-- ❌ NOT sent to external services
+- ❌ Audio/transcripts are not saved by this feature
 
 ### Privacy & Security
 - 🔒 Transcription: Local (Whisper runs on your machine)
@@ -205,12 +205,8 @@ The LLM coach reviews your answers to:
 - 🔒 No tracking, analytics, or logging
 
 **Backup your data:**
-```javascript
-// In browser console (F12):
-copy(JSON.stringify({
-  runbook: JSON.parse(localStorage.getItem('runbook'))
-}, null, 2))
-// Paste into a .json file to backup
+```bash
+aws dynamodb scan --table-name runbook --region "$AWS_REGION"
 ```
 
 ---
@@ -429,13 +425,10 @@ Analytics:
 4. Is audio format supported? Try MP3 or WAV
 
 ### Debug in browser:
-```javascript
-// Check localStorage
-console.log(JSON.parse(localStorage.getItem('runbook')))
-
-// Check for errors
-// Open DevTools (F12) → Console → look for error messages
+```bash
+curl 'http://localhost:5001/api/runbook?userId=default-user'
 ```
+Open DevTools (F12) -> Console to look for browser error messages.
 
 ### Common issues:
 - See SETUP.md → Troubleshooting section

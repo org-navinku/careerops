@@ -235,11 +235,11 @@ http://localhost:8000/careerops.html
 - **CORS enabled** for local requests
 
 ### Data Storage
-All local to your browser:
+Application/runbook data is stored in DynamoDB. Browser-local storage is still used for profile/settings:
 - `base-cv` — Your master CV text
 - `base-cv-timestamp` — When you last updated it (NEW!)
-- `app-log` — All applications with CV versions (NEW field!)
-- `runbook` — Interview questions with enhanced structure (NEW fields!)
+- `applications` DynamoDB table — All applications with CV versions
+- `runbook` DynamoDB table — Interview questions with enhanced structure
 
 ---
 
@@ -312,13 +312,9 @@ python3 backend.py
 7. ✅ Review questions by company to prep for next round
 
 ### Data You Can Export
-```javascript
-// In browser console (F12):
-copy(JSON.stringify({
-  applications: JSON.parse(localStorage.getItem('app-log')),
-  runbook: JSON.parse(localStorage.getItem('runbook')),
-  baseCv: localStorage.getItem('base-cv')
-}, null, 2))
+```bash
+aws dynamodb scan --table-name applications --region "$AWS_REGION"
+aws dynamodb scan --table-name runbook --region "$AWS_REGION"
 ```
 Then paste into a `.json` file to backup.
 

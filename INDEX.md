@@ -319,15 +319,15 @@
 ## ❓ Common Questions
 
 ### Q: Is my data safe?
-**A:** Yes! Everything stays on your computer. No cloud, no tracking.  
+**A:** Application and runbook data is stored in AWS DynamoDB; base CV/settings stay in browser storage.  
 **See:** [README.md](README.md#-privacy--data)
 
 ### Q: What if I lose my data?
-**A:** Export it anytime as JSON backup.  
+**A:** Export application/runbook data from DynamoDB and keep a copy of browser-local base CV/settings.  
 **See:** [QUICK_REFERENCE.md](QUICK_REFERENCE.md#-export-data-backup)
 
 ### Q: Can I use this on multiple devices?
-**A:** Not automatically (browser-local only). Backup/restore manually via JSON.  
+**A:** Application/runbook data can be shared through DynamoDB for the same user; base CV/settings remain browser-local.  
 **See:** [PROJECT_STATUS.md](PROJECT_STATUS.md#data-storage)
 
 ### Q: How much does it cost?

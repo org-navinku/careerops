@@ -125,26 +125,7 @@ aws ecr describe-images --repository-name $ECR_REPO_NAME --region $AWS_REGION
 # 5. Create service from task definition
 ```
 
-### Option 2: Using EC2 with Docker
-
-```bash
-# SSH into EC2 instance
-ssh -i your-key.pem ec2-user@your-instance-ip
-
-# Authenticate with ECR
-aws ecr get-login-password --region $AWS_REGION | \
-  docker login --username AWS --password-stdin $ECR_URI
-
-# Pull and run
-docker run -d \
-  --name careerops \
-  -p 5001:5001 \
-  -p 8000:8000 \
-  -e OLLAMA_BASE=http://ollama-service:11434 \
-  $ECR_URI:latest
-```
-
-### Option 3: Using EKS (Kubernetes)
+### Option 2: Using EKS (Kubernetes)
 
 ```yaml
 # deployment.yaml
@@ -356,7 +337,7 @@ aws ecr delete-repository \
 
 1. Build and test locally: `docker-compose up`
 2. Push to ECR: Follow push to ECR steps above
-3. Deploy to ECS/EC2/EKS: Use your preferred deployment method
+3. Deploy to ECS or EKS: Use your preferred deployment method
 4. Monitor: Set up CloudWatch logs for container output
 5. Scale: Use auto-scaling groups or Kubernetes HPA
 

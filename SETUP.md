@@ -199,9 +199,9 @@ http://localhost:8000/careerops.html
 - **Save suggestions** with questions for future reference
 
 ### ✅ **Data Persistence**
-- All data stored in browser's **localStorage** (survives browser restart)
-- Can export/backup JSON if needed
-- No cloud sync (completely private, on your machine)
+- Applications and runbook questions are stored in **AWS DynamoDB**
+- DynamoDB is fully managed and does not require EC2 resources
+- Base CV and LLM settings are stored in browser **localStorage**
 
 ---
 
@@ -279,7 +279,7 @@ First run will download the model (~140MB) — be patient.
 
 ## Data Format (What Gets Stored)
 
-### Applications (localStorage key: `app-log`)
+### Applications (`applications` DynamoDB table)
 ```json
 [
   {
@@ -301,7 +301,7 @@ First run will download the model (~140MB) — be patient.
 ]
 ```
 
-### Interview Questions (localStorage key: `runbook`)
+### Interview Questions (`runbook` DynamoDB table)
 ```json
 {
   "Acme Corp — Senior DevOps Engineer": [
@@ -401,9 +401,9 @@ Future implementations will allow you to swap backends without code changes.
 ## Limitations & Known Issues
 
 ### ⚠️ **Current Limitations**
-- **No cloud sync** — data only lives in your browser
-- **No multi-device sync** — export/import manually if you want to move data
-- **No bulk export** — runbook and applications stored as JSON in localStorage
+- **DynamoDB required for pipeline/runbook persistence** — backend needs AWS credentials
+- **Base CV remains browser-local** — export/import manually if you want to move it
+- **No bulk export UI** — use DynamoDB scan/export commands for applications and runbook data
 - **Ollama required for CV generation** — currently only Ollama is fully integrated
 - **ATS score is an estimate** — real ATS systems are proprietary; this is a good proxy
 
@@ -436,20 +436,15 @@ This is a personal project. If you want to add features:
 
 ### Debug mode
 Open browser DevTools (F12) and check Console for errors:
-```javascript
-// Check what's stored:
-console.log(JSON.parse(localStorage.getItem('app-log')))
-console.log(JSON.parse(localStorage.getItem('runbook')))
+```bash
+curl 'http://localhost:5001/api/applications?userId=default-user'
+curl 'http://localhost:5001/api/runbook?userId=default-user'
 ```
 
 ### Export your data (backup)
-```javascript
-// In browser console:
-copy(JSON.stringify({
-  applications: JSON.parse(localStorage.getItem('app-log')),
-  runbook: JSON.parse(localStorage.getItem('runbook')),
-  baseCv: localStorage.getItem('base-cv')
-}, null, 2))
+```bash
+aws dynamodb scan --table-name applications --region "$AWS_REGION"
+aws dynamodb scan --table-name runbook --region "$AWS_REGION"
 ```
 
 Then paste into a `.json` file to save.

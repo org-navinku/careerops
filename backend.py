@@ -6,6 +6,11 @@ import hmac
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import requests
+from datetime import datetime
+from decimal import Decimal
+import boto3
+from boto3.dynamodb.conditions import Key
+
 try:
     from docx import Document
     DOCX_AVAILABLE = True
@@ -27,6 +32,30 @@ TRANSCRIPTION_MODEL = os.environ.get('OPENAI_TRANSCRIPTION_MODEL', 'gpt-4o-mini-
 REQUIRE_OLLAMA_ON_START = os.environ.get('REQUIRE_OLLAMA_ON_START', '').lower() in ('1', 'true', 'yes')
 CAREEROPS_USERNAME = os.environ.get('CAREEROPS_USERNAME', '')
 CAREEROPS_PASSWORD = os.environ.get('CAREEROPS_PASSWORD', '')
+AWS_REGION = os.environ.get('AWS_REGION', 'us-east-1')
+
+# Initialize DynamoDB using the standard AWS credential provider chain.
+try:
+    dynamodb = boto3.resource('dynamodb', region_name=AWS_REGION)
+    applications_table = dynamodb.Table('applications')
+    runbook_table = dynamodb.Table('runbook')
+    DYNAMODB_AVAILABLE = True
+except Exception as e:
+    print(f"⚠️  DynamoDB initialization failed: {e}")
+    DYNAMODB_AVAILABLE = False
+
+def dynamodb_safe(value):
+    """Convert JSON payloads into DynamoDB-compatible values."""
+    return json.loads(json.dumps(value), parse_float=Decimal)
+
+def json_safe(value):
+    if isinstance(value, list):
+        return [json_safe(item) for item in value]
+    if isinstance(value, dict):
+        return {key: json_safe(item) for key, item in value.items()}
+    if isinstance(value, Decimal):
+        return int(value) if value % 1 == 0 else float(value)
+    return value
 
 def check_ollama():
     return check_ollama_at(OLLAMA_BASE)
@@ -46,6 +75,219 @@ def resolve_ollama_base(header_base=None):
         return OLLAMA_BASE
     return header_base
 
+# ========== APPLICATIONS API ==========
+
+@app.route('/api/applications', methods=['GET'])
+def get_applications():
+    """Get all applications for a user"""
+    if not DYNAMODB_AVAILABLE:
+        return jsonify({'error': 'DynamoDB not available'}), 503
+    
+    try:
+        user_id = request.args.get('userId', 'default-user')
+        response = applications_table.query(
+            KeyConditionExpression=Key('userId').eq(user_id)
+        )
+        items = json_safe(response.get('Items', []))
+        # Sort by dateApplied descending
+        items = sorted(items, key=lambda x: x.get('dateApplied', ''), reverse=True)
+        return jsonify(items)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/applications', methods=['POST'])
+def create_application():
+    """Create or update an application"""
+    if not DYNAMODB_AVAILABLE:
+        return jsonify({'error': 'DynamoDB not available'}), 503
+    
+    try:
+        data = request.json
+        user_id = data.get('userId', 'default-user')
+        
+        item = {
+            'userId': user_id,
+            'id': data.get('id'),
+            'company': data.get('company'),
+            'role': data.get('role'),
+            'jd': data.get('jd', ''),
+            'status': data.get('status', 'Applied'),
+            'dateApplied': data.get('dateApplied'),
+            'followUpDate': data.get('followUpDate', ''),
+            'atsScore': data.get('atsScore'),
+            'skills': data.get('skills', []),
+            'notes': data.get('notes', ''),
+            'tailoredCV': data.get('tailoredCV', ''),
+            'coverLetter': data.get('coverLetter', ''),
+            'emailDraft': data.get('emailDraft', ''),
+            'baseCvVersion': data.get('baseCvVersion', ''),
+            'timestamp': int(datetime.now().timestamp())
+        }
+        
+        applications_table.put_item(Item=dynamodb_safe(item))
+        return jsonify({'status': 'ok', 'id': data.get('id')})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/applications/<app_id>', methods=['PUT'])
+def update_application(app_id):
+    """Update an application"""
+    if not DYNAMODB_AVAILABLE:
+        return jsonify({'error': 'DynamoDB not available'}), 503
+    
+    try:
+        data = request.json
+        user_id = data.get('userId', 'default-user')
+        
+        # Get existing item
+        response = applications_table.get_item(
+            Key={'userId': user_id, 'id': app_id}
+        )
+        existing = response.get('Item', {})
+        
+        # Merge with new data
+        item = {**existing, **data}
+        item['timestamp'] = int(datetime.now().timestamp())
+        
+        applications_table.put_item(Item=dynamodb_safe(item))
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/applications/<app_id>', methods=['DELETE'])
+def delete_application(app_id):
+    """Delete an application"""
+    if not DYNAMODB_AVAILABLE:
+        return jsonify({'error': 'DynamoDB not available'}), 503
+    
+    try:
+        user_id = request.args.get('userId', 'default-user')
+        applications_table.delete_item(
+            Key={'userId': user_id, 'id': app_id}
+        )
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ========== RUNBOOK API ==========
+
+@app.route('/api/runbook', methods=['GET'])
+def get_runbook():
+    """Get all runbook questions for a user"""
+    if not DYNAMODB_AVAILABLE:
+        return jsonify({'error': 'DynamoDB not available'}), 503
+    
+    try:
+        user_id = request.args.get('userId', 'default-user')
+        response = runbook_table.query(
+            KeyConditionExpression=Key('userId').eq(user_id)
+        )
+        items = json_safe(response.get('Items', []))
+        return jsonify(items)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/runbook', methods=['POST'])
+def create_question():
+    """Add an interview question to runbook"""
+    if not DYNAMODB_AVAILABLE:
+        return jsonify({'error': 'DynamoDB not available'}), 503
+    
+    try:
+        data = request.json
+        user_id = data.get('userId', 'default-user')
+        
+        item = {
+            'userId': user_id,
+            'id': data.get('id'),
+            'roleKey': data.get('roleKey', ''),
+            'question': data.get('question'),
+            'type': data.get('type'),
+            'round': data.get('round'),
+            'outcome': data.get('outcome'),
+            'notes': data.get('notes', ''),
+            'date': data.get('date'),
+            'suggestions': data.get('suggestions'),
+            'timestamp': int(datetime.now().timestamp())
+        }
+        
+        runbook_table.put_item(Item=dynamodb_safe(item))
+        return jsonify({'status': 'ok', 'id': data.get('id')})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/runbook/<question_id>', methods=['PUT'])
+def update_question(question_id):
+    """Update a runbook question"""
+    if not DYNAMODB_AVAILABLE:
+        return jsonify({'error': 'DynamoDB not available'}), 503
+    
+    try:
+        data = request.json
+        user_id = data.get('userId', 'default-user')
+        
+        # Get existing item
+        response = runbook_table.get_item(
+            Key={'userId': user_id, 'id': question_id}
+        )
+        existing = response.get('Item', {})
+        
+        # Merge with new data
+        item = {**existing, **data}
+        item['timestamp'] = int(datetime.now().timestamp())
+        
+        runbook_table.put_item(Item=dynamodb_safe(item))
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/runbook/<question_id>', methods=['DELETE'])
+def delete_question(question_id):
+    """Delete a runbook question"""
+    if not DYNAMODB_AVAILABLE:
+        return jsonify({'error': 'DynamoDB not available'}), 503
+    
+    try:
+        user_id = request.args.get('userId', 'default-user')
+        runbook_table.delete_item(
+            Key={'userId': user_id, 'id': question_id}
+        )
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ========== HEALTH CHECK ==========
+
+@app.route('/api/health', methods=['GET'])
+def health():
+    """Health check endpoint"""
+    try:
+        ollama_running = check_ollama()
+        
+        # Test DynamoDB connection
+        dynamodb_status = 'disconnected'
+        if DYNAMODB_AVAILABLE:
+            try:
+                applications_table.table_status
+                dynamodb_status = 'connected'
+            except:
+                dynamodb_status = 'disconnected'
+        
+        return jsonify({
+            'status': 'ok',
+            'ollama': 'connected' if ollama_running else 'disconnected',
+            'model': MODEL,
+            'dynamodb': dynamodb_status,
+            'docx_support': DOCX_AVAILABLE
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'error': str(e)
+        }), 500
+
+# ========== LOGIN ==========
+
 @app.route('/api/login', methods=['POST'])
 def login():
     if not CAREEROPS_PASSWORD:
@@ -63,277 +305,26 @@ def login():
 
     return jsonify({'error': 'Invalid username or password'}), 401
 
-@app.route('/api/health', methods=['GET'])
-def health():
-    ollama_running = check_ollama()
-    return jsonify({
-        'status': 'ok',
-        'ollama': 'connected' if ollama_running else 'disconnected',
-        'model': MODEL,
-        'transcription_model': TRANSCRIPTION_MODEL,
-        'transcription_api': 'configured' if OPENAI_API_KEY else 'missing_api_key',
-        'docx_support': DOCX_AVAILABLE
-    })
-
-@app.route('/api/generate-docx', methods=['POST'])
-def generate_docx():
-    if not DOCX_AVAILABLE:
-        return jsonify({'error': 'python-docx not installed'}), 400
-    try:
-        from io import BytesIO
-        from docx.shared import Pt, RGBColor, Inches
-        from docx.enum.text import WD_ALIGN_PARAGRAPH
-        from docx.oxml.ns import qn
-        from docx.oxml import OxmlElement
-        import copy
-
-        data = request.json or {}
-        cv_text = data.get('cv_text', '')
-        if not cv_text.strip():
-            return jsonify({'error': 'No CV text provided'}), 400
-
-        doc = Document()
-
-        # Page margins
-        for section in doc.sections:
-            section.top_margin = Inches(0.7)
-            section.bottom_margin = Inches(0.7)
-            section.left_margin = Inches(0.85)
-            section.right_margin = Inches(0.85)
-
-        def add_hr(paragraph):
-            p = paragraph._p
-            pPr = p.get_or_add_pPr()
-            pBdr = OxmlElement('w:pBdr')
-            bottom = OxmlElement('w:bottom')
-            bottom.set(qn('w:val'), 'single')
-            bottom.set(qn('w:sz'), '6')
-            bottom.set(qn('w:space'), '1')
-            bottom.set(qn('w:color'), '1E3C37')
-            pBdr.append(bottom)
-            pPr.append(pBdr)
-
-        def set_spacing(paragraph, before=0, after=0, line=None):
-            from docx.oxml.ns import qn
-            pPr = paragraph._p.get_or_add_pPr()
-            pSpacing = OxmlElement('w:spacing')
-            pSpacing.set(qn('w:before'), str(before))
-            pSpacing.set(qn('w:after'), str(after))
-            if line:
-                pSpacing.set(qn('w:line'), str(line))
-                pSpacing.set(qn('w:lineRule'), 'auto')
-            pPr.append(pSpacing)
-
-        lines = cv_text.split('\n')
-        saw_name = False
-        contact_done = False
-
-        for raw_line in lines:
-            line = raw_line.strip()
-
-            # H1 — Name
-            if line.startswith('# '):
-                content = line[2:].replace('**', '')
-                p = doc.add_paragraph()
-                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                set_spacing(p, before=0, after=40)
-                run = p.add_run(content)
-                run.bold = True
-                run.font.size = Pt(18)
-                run.font.color.rgb = RGBColor(25, 25, 25)
-                saw_name = True
-                continue
-
-            # Contact line
-            if saw_name and not contact_done and line and len(line) < 300 and (
-                '@' in line or '|' in line or 'linkedin' in line.lower() or line.startswith('http')):
-                p = doc.add_paragraph()
-                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                set_spacing(p, before=0, after=60)
-                run = p.add_run(line.replace('**', ''))
-                run.font.size = Pt(8.5)
-                run.font.color.rgb = RGBColor(80, 80, 80)
-                contact_done = True
-                continue
-
-            # H2 — Section header
-            if line.startswith('## '):
-                content = line[3:].replace('**', '').upper()
-                p = doc.add_paragraph()
-                set_spacing(p, before=120, after=40)
-                run = p.add_run(content)
-                run.bold = True
-                run.font.size = Pt(10)
-                run.font.color.rgb = RGBColor(30, 60, 55)
-                add_hr(p)
-                continue
-
-            # H3 — Job title line
-            if line.startswith('### '):
-                content = line[4:].replace('**', '')
-                # Split off trailing (date) if present
-                date_part = ''
-                title_part = content
-                m = re.match(r'^(.+?)\s*\(([^)]+)\)\s*$', content)
-                if m:
-                    title_part = m.group(1).strip()
-                    date_part = m.group(2).strip()
-
-                p = doc.add_paragraph()
-                set_spacing(p, before=80, after=20, line=276)
-                # Title run
-                run_t = p.add_run(title_part)
-                run_t.bold = True
-                run_t.font.size = Pt(10)
-                run_t.font.color.rgb = RGBColor(25, 25, 25)
-                # Date run — right-aligned via tab stop
-                if date_part:
-                    from docx.oxml import OxmlElement
-                    from docx.oxml.ns import qn
-                    from docx.shared import Inches
-                    pPr = p._p.get_or_add_pPr()
-                    tabs = OxmlElement('w:tabs')
-                    tab = OxmlElement('w:tab')
-                    tab.set(qn('w:val'), 'right')
-                    tab.set(qn('w:pos'), '8640')  # ~6 inches from left margin
-                    tabs.append(tab)
-                    pPr.append(tabs)
-                    run_tab = p.add_run('\t')
-                    run_date = p.add_run(date_part)
-                    run_date.font.size = Pt(9)
-                    run_date.font.color.rgb = RGBColor(100, 100, 100)
-                continue
-
-            # Bullet
-            if line.startswith('- ') or line.startswith('* '):
-                content = line[2:].replace('**', '')
-                p = doc.add_paragraph(style='List Bullet')
-                set_spacing(p, before=0, after=20, line=252)
-                run = p.add_run(content)
-                run.font.size = Pt(9)
-                run.font.color.rgb = RGBColor(35, 35, 35)
-                continue
-
-            # Empty line
-            if not line:
-                continue
-
-            # Plain text
-            p = doc.add_paragraph()
-            set_spacing(p, before=0, after=20, line=252)
-            run = p.add_run(line.replace('**', ''))
-            run.font.size = Pt(9)
-            run.font.color.rgb = RGBColor(40, 40, 40)
-
-        buf = BytesIO()
-        doc.save(buf)
-        buf.seek(0)
-        return send_file(
-            buf,
-            mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            as_attachment=True,
-            download_name='CV.docx'
-        )
-    except Exception as e:
-        import traceback
-        return jsonify({'error': str(e), 'trace': traceback.format_exc()}), 500
-
+# ========== DOCX SUPPORT ==========
 
 @app.route('/api/extract-docx', methods=['POST'])
 def extract_docx():
     if not DOCX_AVAILABLE:
-        return jsonify({
-            'error': 'DOCX support not installed',
-            'hint': 'Install with: pip install python-docx'
-        }), 400
-
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file provided'}), 400
-
-    file = request.files['file']
-    if not file.filename.lower().endswith('.docx'):
-        return jsonify({'error': 'Please upload a .docx file'}), 400
-
+        return jsonify({'error': 'python-docx not installed'}), 400
     try:
+        file = request.files.get('file')
+        if not file:
+            return jsonify({'error': 'No file uploaded'}), 400
+        
+        from docx import Document
         doc = Document(file)
         text = '\n'.join([para.text for para in doc.paragraphs])
-        if not text.strip():
-            return jsonify({
-                'error': 'Could not extract text from DOCX',
-                'hint': 'Try re-saving the file or copy-pasting manually'
-            }), 400
-        return jsonify({
-            'text': text,
-            'filename': file.filename
-        })
+        
+        return jsonify({'text': text})
     except Exception as e:
-        return jsonify({
-            'error': f'Failed to read DOCX: {str(e)}'
-        }), 500
+        return jsonify({'error': str(e)}), 500
 
-@app.route('/api/transcribe', methods=['POST'])
-def transcribe():
-    if not OPENAI_API_KEY:
-        return jsonify({
-            'error': 'OpenAI API key not configured',
-            'hint': 'Set OPENAI_API_KEY in the backend environment'
-        }), 503
-
-    try:
-        if 'file' not in request.files:
-            return jsonify({'error': 'No file provided'}), 400
-
-        file = request.files['file']
-        if not file.filename:
-            return jsonify({'error': 'No file selected'}), 400
-
-        files = {
-            'file': (
-                file.filename,
-                file.stream,
-                file.mimetype or 'application/octet-stream'
-            )
-        }
-        data = {
-            'model': TRANSCRIPTION_MODEL,
-            'language': 'en',
-            'response_format': 'json'
-        }
-        headers = {
-            'Authorization': f'Bearer {OPENAI_API_KEY}'
-        }
-
-        response = requests.post(
-            'https://api.openai.com/v1/audio/transcriptions',
-            headers=headers,
-            files=files,
-            data=data,
-            timeout=120
-        )
-
-        if response.status_code >= 400:
-            try:
-                detail = response.json()
-            except ValueError:
-                detail = response.text
-            return jsonify({
-                'error': 'Transcription API request failed',
-                'detail': detail
-            }), response.status_code
-
-        result = response.json()
-        return jsonify({
-            'transcription': result.get('text', ''),
-            'language': 'en',
-            'model': TRANSCRIPTION_MODEL,
-            'usage': result.get('usage')
-        })
-    except Exception as e:
-        import traceback
-        return jsonify({
-            'error': str(e),
-            'trace': traceback.format_exc()
-        }), 500
+# ========== LLM GENERATION ==========
 
 @app.route('/api/generate', methods=['POST'])
 def generate():
@@ -343,7 +334,6 @@ def generate():
         user_msg = data.get('user_message', '')
         model = data.get('model', MODEL)
 
-        # Allow frontend to override Ollama base via header
         ollama_base = resolve_ollama_base(request.headers.get('X-Ollama-Base'))
 
         if not check_ollama_at(ollama_base):
@@ -352,7 +342,6 @@ def generate():
                 'hint': f'Start Ollama with: ollama serve (at {ollama_base})'
             }), 503
 
-        # Build messages for Ollama API (OpenAI-compatible)
         messages = []
         if system:
             messages.append({'role': 'system', 'content': system})
@@ -377,23 +366,16 @@ def generate():
                 'detail': response.text
             }), response.status_code
 
-        data = response.json()
+        result = response.json()
+        message_content = result['choices'][0]['message']['content']
 
-        # Convert Ollama response to Anthropic format
-        message_content = data['choices'][0]['message']['content']
-
-        # The LLM may produce JSON with raw control characters inside string values.
-        # Attempt to fix by escaping unescaped control chars within quoted strings.
         def fix_json_strings(s):
-            """Escape raw control characters inside JSON string values."""
             def escape_inner(m):
                 inner = m.group(1)
                 inner = inner.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
                 return '"' + inner + '"'
-            # Match JSON strings: opening quote, content (non-quote or escaped char), closing quote
             return re.sub(r'"((?:[^"\\]|\\.)*)"', escape_inner, s, flags=re.DOTALL)
 
-        # Try parsing as-is first; if it fails, attempt to fix control characters
         stripped = message_content.strip()
         if stripped.startswith('```'):
             stripped = re.sub(r'^```(?:json)?\s*', '', stripped)
@@ -428,6 +410,17 @@ if __name__ == '__main__':
             exit(1)
     else:
         print("✅ Ollama connected!")
+    
+    if DYNAMODB_AVAILABLE:
+        print(f"\n🔍 Checking DynamoDB...")
+        try:
+            applications_table.table_status
+            print("✅ DynamoDB connected!")
+        except Exception as e:
+            print(f"⚠️  DynamoDB connection error: {e}")
+    else:
+        print("\n⚠️  DynamoDB not available")
+    
     print(f"📦 Using model: {MODEL}")
     print(f"🚀 Backend running on http://localhost:{port}")
     print(f"📄 Frontend: http://localhost:8000/careerops.html")

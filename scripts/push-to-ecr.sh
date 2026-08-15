@@ -104,9 +104,9 @@ echo -e "${GREEN}Latest URI: $ECR_URI:latest${NC}\n"
 
 # Print next steps
 echo -e "${YELLOW}Next steps:${NC}"
-echo "1. Deploy to ECS/EC2/EKS using the image URI above"
+echo "1. Deploy to ECS or EKS using the image URI above"
 echo "2. Set environment variables for Ollama connection"
-echo "3. Configure security groups and IAM roles"
+echo "3. Configure runtime environment variables and AWS credentials"
 echo "4. Monitor container logs in CloudWatch"
 echo ""
 echo -e "${YELLOW}Useful commands:${NC}"

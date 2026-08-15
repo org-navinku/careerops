@@ -70,11 +70,10 @@ User Browser (Firefox/Chrome/Safari)
     │   ├─ Tab 3: Runbook (interview questions)
     │   └─ Tab 4: Base Profile (CV management)
     │
-    ├─→ [localStorage] Data persistence (100% client-side)
+    ├─→ [localStorage] Browser-only preferences/profile drafts
     │   ├─ base-cv (your master CV)
     │   ├─ base-cv-timestamp (version tracking)
-    │   ├─ app-log (all applications)
-    │   └─ runbook (interview questions)
+    │   └─ llm-config (generation settings)
     │
     └─→ [Fetch API] ↓ HTTP calls
          │
@@ -85,6 +84,9 @@ User Browser (Firefox/Chrome/Safari)
              │
              ├─ POST /api/extract-docx (NEW!)
              │  └─→ Parses .docx file → Returns extracted text
+             │
+             ├─ /api/applications + /api/runbook
+             │  └─→ Stores pipeline and runbook data in DynamoDB
              │
              └─ GET /api/health
                 └─→ Checks Ollama status
@@ -107,7 +109,7 @@ User Browser (Firefox/Chrome/Safari)
 | PDF Export | ✅ Complete | ATS-safe formatting, professional design |
 | Application Tracking | ✅ Complete | Status, follow-ups, version tracking |
 | Interview Runbook | ✅ Enhanced | Question types, outcomes, color badges |
-| Data Persistence | ✅ Complete | localStorage, browser-local storage |
+| Data Persistence | ✅ Complete | DynamoDB for application/runbook data |
 | Responsive UI | ✅ Complete | Desktop, tablet, mobile friendly |
 
 ---
@@ -140,7 +142,7 @@ careerops/
 
 ### Frontend
 - **HTML5 + CSS3 + Vanilla JavaScript** (no frameworks)
-- **localStorage API** — Client-side persistence
+- **localStorage API** — Browser-only profile/settings storage
 - **Fetch API** — Backend communication
 - **jsPDF** — PDF generation (professional CV export)
 - **pdf.js** — PDF text extraction
@@ -150,6 +152,7 @@ careerops/
 - **Flask-CORS** — Cross-origin requests
 - **python-docx** — DOCX file parsing ✨ NEW!
 - **requests** — Ollama API calls
+- **boto3** — DynamoDB access
 
 ### LLM
 - **Ollama** — Local LLM inference
@@ -157,8 +160,8 @@ careerops/
 - **neural-chat** — Faster alternative (3.5B params)
 
 ### Data Storage
-- **localStorage** — 100% client-side (5-10MB limit)
-- **JSON structure** — Human-readable, easy to export
+- **AWS DynamoDB** — Fully managed storage for applications and runbook questions
+- **localStorage** — Browser storage for base CV and settings
 
 ---
 
@@ -355,10 +358,9 @@ fetch('http://localhost:5000/api/extract-docx', {
 ```
 
 ### Test Data Persistence
-```javascript
-// In browser console:
-console.log(JSON.parse(localStorage.getItem('app-log')));
-console.log(JSON.parse(localStorage.getItem('runbook')));
+```bash
+curl 'http://localhost:5001/api/applications?userId=default-user'
+curl 'http://localhost:5001/api/runbook?userId=default-user'
 ```
 
 ---
@@ -392,16 +394,16 @@ Try these in order:
 3. Export DOCX as PDF, upload PDF instead
 
 ### "Data not saving"
-- Disable private/incognito browsing
-- Clear browser cache
-- Try a different browser
-- Check localStorage isn't full: `localStorage.setItem('test', 'data')`
+- Confirm the backend is running on port 5001
+- Confirm `deploy-dynamodb.sh` has created the `applications` and `runbook` tables
+- Check `/api/health` and verify the `dynamodb` field is `connected`
+- Confirm `AWS_REGION` and AWS credentials are available to the backend
 
 ---
 
 ## 📊 Data Schema
 
-### Applications (localStorage: `app-log`)
+### Applications (`applications` DynamoDB table)
 ```json
 {
   "id": "unique-id",
@@ -518,13 +520,9 @@ fetch('http://localhost:5000/api/health').then(r=>r.json()).then(console.log);
 ```
 
 ### Export Data (Backup)
-```javascript
-copy(JSON.stringify({
-  applications: JSON.parse(localStorage.getItem('app-log')),
-  runbook: JSON.parse(localStorage.getItem('runbook')),
-  baseCv: localStorage.getItem('base-cv')
-}, null, 2))
-// Paste into .json file
+```bash
+aws dynamodb scan --table-name applications --region "$AWS_REGION"
+aws dynamodb scan --table-name runbook --region "$AWS_REGION"
 ```
 
 ### Clear Data (Fresh Start)

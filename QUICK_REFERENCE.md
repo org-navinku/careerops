@@ -194,26 +194,21 @@ Color legend:
 
 ## 💾 Where Is My Data Saved?
 
-All data is stored **locally in your browser** using localStorage:
+Application and runbook data is stored in **AWS DynamoDB**. Base profile and settings remain in browser localStorage:
 
 | Key | What | Location |
 |-----|------|----------|
 | `base-cv` | Your master CV text | Browser localStorage |
 | `base-cv-timestamp` | When it was saved | Browser localStorage |
-| `app-log` | All applications | Browser localStorage |
-| `runbook` | Interview questions | Browser localStorage |
+| `applications` | All applications | DynamoDB table |
+| `runbook` | Interview questions | DynamoDB table |
 
-**Privacy:** ✅ Everything stays on your machine. No cloud, no analytics, no tracking.
+**AWS:** DynamoDB is fully managed; this app does not need EC2 to store data.
 
 **Backup:** Export your data
-```javascript
-// In browser console (F12):
-copy(JSON.stringify({
-  applications: JSON.parse(localStorage.getItem('app-log')),
-  runbook: JSON.parse(localStorage.getItem('runbook')),
-  baseCv: localStorage.getItem('base-cv')
-}, null, 2))
-// Then paste into a .json file
+```bash
+aws dynamodb scan --table-name applications --region "$AWS_REGION"
+aws dynamodb scan --table-name runbook --region "$AWS_REGION"
 ```
 
 ---
@@ -434,23 +429,15 @@ Celebrate! 🎉
 ## 📞 Support
 
 ### Debug Mode
-Press F12 → Console → Run:
-```javascript
-// Check what's stored
-console.log(JSON.parse(localStorage.getItem('app-log')))
-
-// Check Ollama status
-fetch('http://localhost:5000/api/health').then(r=>r.json()).then(console.log)
+```bash
+curl 'http://localhost:5001/api/applications?userId=default-user'
+curl 'http://localhost:5001/api/runbook?userId=default-user'
 ```
 
 ### Export Data (Backup)
-```javascript
-copy(JSON.stringify({
-  applications: JSON.parse(localStorage.getItem('app-log')),
-  runbook: JSON.parse(localStorage.getItem('runbook')),
-  baseCv: localStorage.getItem('base-cv')
-}, null, 2))
-// Then paste into a .json file
+```bash
+aws dynamodb scan --table-name applications --region "$AWS_REGION"
+aws dynamodb scan --table-name runbook --region "$AWS_REGION"
 ```
 
 ### Clear Data (Fresh Start)

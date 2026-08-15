@@ -84,16 +84,16 @@
 ---
 
 ### 7. Data Persistence
-- ✅ **localStorage** — All data saved locally in browser
-- ✅ **Survives Restart** — Persistent across browser sessions
-- ✅ **No Cloud Sync** — Completely private, stays on your machine
-- ✅ **JSON Structure** — Human-readable format
+- ✅ **DynamoDB** — Applications and runbook questions saved in AWS DynamoDB
+- ✅ **Survives Restart** — Data reloads from DynamoDB after sign-in
+- ✅ **Fully Managed** — DynamoDB does not require EC2 provisioning
+- ✅ **Browser Storage** — Base CV and settings remain in localStorage
 
-**Storage Keys:**
+**Storage:**
 - `base-cv` — Your master CV
 - `base-cv-timestamp` — When it was last saved
-- `app-log` — All applications
-- `runbook` — Interview questions by role
+- `applications` DynamoDB table — All applications
+- `runbook` DynamoDB table — Interview questions by role
 
 ---
 
@@ -173,7 +173,7 @@
 
 ### Frontend Stack
 - **HTML5 + Vanilla JS** — No frameworks, ~1300 lines
-- **localStorage API** — Client-side data persistence
+- **localStorage API** — Browser profile/settings storage
 - **jsPDF** — PDF generation
 - **pdf.js** — PDF text extraction
 - **Fetch API** — Backend communication
@@ -184,6 +184,7 @@
 - **Flask-CORS** — Cross-origin requests
 - **python-docx** — DOCX text extraction
 - **requests** — Ollama API calls
+- **boto3** — DynamoDB access
 - **Re module** — JSON correction/escaping
 
 ### LLM Integration
@@ -208,7 +209,7 @@ If score < 80: iterate up to 3 times
     ↓
 Show results with keywords, allow edit
     ↓
-User logs to pipeline (stored in localStorage)
+User logs to pipeline (stored in DynamoDB)
 ```
 
 ---

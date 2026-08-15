@@ -585,16 +585,122 @@ function addLogoutButton(){
 }
 
 // ---------- storage helpers ----------
+function storageUserId(){
+  return currentUser && currentUser.username ? currentUser.username : 'default-user';
+}
+
+function runbookFromItems(items){
+  const grouped = {};
+  (items || []).forEach(item=>{
+    const key = item.roleKey || 'General';
+    if(!grouped[key]) grouped[key] = [];
+    grouped[key].push({
+      id: item.id,
+      question: item.question || '',
+      type: item.type || 'technical',
+      round: item.round || '',
+      outcome: item.outcome || '',
+      notes: item.notes || '',
+      date: item.date || new Date().toISOString().slice(0,10),
+      suggestions: item.suggestions || null
+    });
+  });
+  Object.keys(grouped).forEach(key=>{
+    grouped[key].sort((a,b)=> (b.date || '').localeCompare(a.date || ''));
+  });
+  return grouped;
+}
+
+function runbookToItems(grouped){
+  return Object.entries(grouped || {}).flatMap(([roleKey, questions])=>
+    (questions || []).map(question=> ({ ...question, roleKey }))
+  );
+}
+
+async function apiRequest(path, options){
+  const response = await fetch(path, options);
+  const data = await response.json().catch(()=> null);
+  if(!response.ok){
+    throw new Error(data && data.error ? data.error : `Request failed: ${response.status}`);
+  }
+  return data;
+}
+
 async function sget(key){
+  if(key === 'app-log'){
+    const items = await apiRequest(`/api/applications?userId=${encodeURIComponent(storageUserId())}`);
+    return JSON.stringify(items || []);
+  }
+  if(key === 'runbook'){
+    const items = await apiRequest(`/api/runbook?userId=${encodeURIComponent(storageUserId())}`);
+    return JSON.stringify(runbookFromItems(items || []));
+  }
+
   try{
     const val = localStorage.getItem(key);
-    return val ? { value: val } : null;
+    return val || null;
   }catch(e){
     console.error('storage get failed', e);
     return null;
   }
 }
 async function sset(key, value){
+  if(key === 'app-log'){
+    try{
+      const nextItems = JSON.parse(value || '[]');
+      const previousItems = await apiRequest(`/api/applications?userId=${encodeURIComponent(storageUserId())}`);
+      const nextIds = new Set(nextItems.map(item=> item.id));
+
+      for(const item of nextItems){
+        await apiRequest('/api/applications', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...item, userId: storageUserId() })
+        });
+      }
+
+      for(const item of previousItems || []){
+        if(!nextIds.has(item.id)){
+          await apiRequest(`/api/applications/${encodeURIComponent(item.id)}?userId=${encodeURIComponent(storageUserId())}`, {
+            method: 'DELETE'
+          });
+        }
+      }
+      return true;
+    }catch(e){
+      console.error('DynamoDB application save failed', e);
+      return null;
+    }
+  }
+
+  if(key === 'runbook'){
+    try{
+      const nextItems = runbookToItems(JSON.parse(value || '{}'));
+      const previousItems = await apiRequest(`/api/runbook?userId=${encodeURIComponent(storageUserId())}`);
+      const nextIds = new Set(nextItems.map(item=> item.id));
+
+      for(const item of nextItems){
+        await apiRequest('/api/runbook', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...item, userId: storageUserId() })
+        });
+      }
+
+      for(const item of previousItems || []){
+        if(!nextIds.has(item.id)){
+          await apiRequest(`/api/runbook/${encodeURIComponent(item.id)}?userId=${encodeURIComponent(storageUserId())}`, {
+            method: 'DELETE'
+          });
+        }
+      }
+      return true;
+    }catch(e){
+      console.error('DynamoDB runbook save failed', e);
+      return null;
+    }
+  }
+
   for(let attempt=0; attempt<2; attempt++){
     try{
       localStorage.setItem(key, value);

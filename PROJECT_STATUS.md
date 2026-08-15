@@ -66,7 +66,7 @@
 - ✅ PDF generation & export
 - ✅ Application pipeline tracking
 - ✅ Interview question runbook
-- ✅ Data persistence (localStorage)
+- ✅ Data persistence (DynamoDB for applications/runbook)
 
 ### User Experience
 - ✅ Dark theme (developer-friendly)
@@ -77,9 +77,9 @@
 - ✅ Inline editing with auto-save
 
 ### Data Management
-- ✅ 100% client-side storage (localStorage)
-- ✅ Automatic persistence (survives browser restart)
-- ✅ Exportable as JSON (backup-friendly)
+- ✅ DynamoDB storage for applications and interview runbook
+- ✅ Automatic persistence through backend API
+- ✅ Browser localStorage for base CV and settings
 - ✅ Version tracking (base profile timestamps)
 - ✅ Full application history
 
@@ -233,20 +233,20 @@ All data stored locally in browser (100% private):
 |------|-----|------|-------|
 | Master CV | `base-cv` | ~5-50KB | Your full CV text |
 | CV Timestamp | `base-cv-timestamp` | ~24B | When last saved |
-| Applications | `app-log` | ~50-500KB | All companies/roles |
-| Interview Q&A | `runbook` | ~20-200KB | All questions |
+| Applications | DynamoDB `applications` table | Usage-based | All companies/roles |
+| Interview Q&A | DynamoDB `runbook` table | Usage-based | All questions |
 
-**Total:** ~100-750KB (small, stays local, no cloud)
+**Storage:** DynamoDB is fully managed and does not require EC2 resources.
 
 ---
 
 ## 🔒 Privacy & Security
 
-- ✅ **Zero Cloud** — Everything stays on your computer
+- ✅ **Managed Storage** — Application/runbook data lives in DynamoDB
 - ✅ **No Tracking** — No analytics, no cookies, no ads
-- ✅ **Encrypted Storage** — Browser's native encryption
+- ✅ **Encrypted Storage** — DynamoDB managed encryption plus browser storage for profile/settings
 - ✅ **Exportable** — Easy to backup or move data
-- ✅ **Deletable** — `localStorage.clear()` to wipe all
+- ✅ **Deletable** — Delete DynamoDB table items and clear browser storage
 
 **Note:** LLM calls go to Ollama (localhost), not to cloud.
 
@@ -336,12 +336,12 @@ All data stored locally in browser (100% private):
 ## ✨ Highlights
 
 ### What Makes This Good
-1. **Zero Cloud** — Your data never leaves your computer
+1. **Managed Persistence** — Pipeline and runbook data use DynamoDB
 2. **No Frameworks** — Pure HTML/CSS/JS, fast and simple
 3. **AI-Powered** — LLM tailoring for realistic CVs
 4. **Comprehensive** — Covers full hiring workflow (apply → interview → decision)
 5. **Well Documented** — 22 pages of docs, not just code
-6. **Extensible** — Easy to add features (localStorage-based, modular code)
+6. **Extensible** — Easy to add features with modular frontend/backend code
 7. **Offline Capable** — Works without internet (except LLM calls)
 
 ### What's Different
@@ -405,10 +405,9 @@ All data stored locally in browser (100% private):
 4. Refer to SETUP.md troubleshooting section
 
 ### Debug Commands
-```javascript
-// In browser console (F12):
-console.log(localStorage.getItem('app-log'));
-fetch('http://localhost:5000/api/health').then(r=>r.json()).then(console.log);
+```bash
+curl 'http://localhost:5001/api/health'
+curl 'http://localhost:5001/api/applications?userId=default-user'
 ```
 
 ---
