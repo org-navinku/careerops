@@ -44,6 +44,22 @@ except Exception as e:
     print(f"⚠️  DynamoDB initialization failed: {e}")
     DYNAMODB_AVAILABLE = False
 
+# Initialize S3 client for CV file storage.
+S3_BUCKET = 'careerops-589535355002'
+MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
+ALLOWED_EXTENSIONS = {'.pdf', '.docx'}
+ALLOWED_CONTENT_TYPES = {
+    '.pdf': 'application/pdf',
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+}
+
+try:
+    s3_client = boto3.client('s3', region_name=AWS_REGION)
+    S3_AVAILABLE = True
+except Exception as e:
+    print(f"⚠️  S3 initialization failed: {e}")
+    S3_AVAILABLE = False
+
 def dynamodb_safe(value):
     """Convert JSON payloads into DynamoDB-compatible values."""
     return json.loads(json.dumps(value), parse_float=Decimal)
@@ -74,6 +90,37 @@ def resolve_ollama_base(header_base=None):
     if 'localhost' in header_base and 'localhost' not in OLLAMA_BASE:
         return OLLAMA_BASE
     return header_base
+
+
+def validate_cv_file(file):
+    """Validate an uploaded CV file. Returns (None) on success or (error_message) on failure."""
+    if not file or not file.filename:
+        return 'No file provided'
+
+    # Check extension
+    filename = file.filename
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        return f'Invalid file type. Allowed formats: {", ".join(sorted(ALLOWED_EXTENSIONS))}'
+
+    # Check Content-Type matches extension
+    expected_content_type = ALLOWED_CONTENT_TYPES.get(ext)
+    if file.content_type != expected_content_type:
+        return f'Content-Type mismatch. Expected {expected_content_type} for {ext} file'
+
+    # Check file size (read content to verify)
+    file.seek(0, os.SEEK_END)
+    size = file.tell()
+    file.seek(0)
+
+    if size == 0:
+        return 'File is empty'
+
+    if size > MAX_FILE_SIZE:
+        return f'File too large. Maximum size is 5 MB'
+
+    return None
+
 
 # ========== APPLICATIONS API ==========
 
@@ -168,6 +215,180 @@ def delete_application(app_id):
         return jsonify({'status': 'ok'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+# ========== CV UPLOAD API ==========
+
+@app.route('/api/applications/<app_id>/cv', methods=['POST'])
+def upload_cv(app_id):
+    """Upload a CV file for a specific application"""
+    if not S3_AVAILABLE:
+        return jsonify({'error': 'Storage service is unavailable'}), 503
+
+    # Extract userId from form data
+    user_id = request.form.get('userId')
+    if not user_id:
+        return jsonify({'error': 'userId is required'}), 400
+
+    # Get the uploaded file
+    file = request.files.get('file')
+
+    # Validate the file
+    validation_error = validate_cv_file(file)
+    if validation_error:
+        return jsonify({'error': validation_error}), 400
+
+    # Verify the application exists for this user in DynamoDB
+    try:
+        response = applications_table.get_item(
+            Key={'userId': user_id, 'id': app_id}
+        )
+    except Exception as e:
+        return jsonify({'error': f'Database error: {str(e)}'}), 500
+
+    item = response.get('Item')
+    if not item:
+        return jsonify({'error': 'Application not found'}), 404
+
+    # Check userId ownership
+    if item.get('userId') != user_id:
+        return jsonify({'error': 'Insufficient permissions'}), 403
+
+    # Upload file to S3
+    filename = file.filename
+    s3_key = f"{user_id}/{app_id}/{filename}"
+
+    try:
+        file.seek(0)
+        s3_client.put_object(
+            Bucket=S3_BUCKET,
+            Key=s3_key,
+            Body=file.read(),
+            ContentType=file.content_type
+        )
+    except Exception as e:
+        return jsonify({'error': 'Failed to upload file to storage'}), 503
+
+    # Update DynamoDB record with CV metadata
+    try:
+        applications_table.update_item(
+            Key={'userId': user_id, 'id': app_id},
+            UpdateExpression='SET cvS3Key = :s3key, cvFilename = :fname',
+            ExpressionAttributeValues={
+                ':s3key': s3_key,
+                ':fname': filename
+            }
+        )
+    except Exception as e:
+        return jsonify({'error': f'Failed to update application record: {str(e)}'}), 500
+
+    return jsonify({
+        'status': 'ok',
+        'filename': filename,
+        's3Key': s3_key
+    }), 200
+
+
+@app.route('/api/applications/<app_id>/cv', methods=['GET'])
+def download_cv(app_id):
+    """Download a CV file for a specific application"""
+    if not S3_AVAILABLE:
+        return jsonify({'error': 'Storage service is unavailable'}), 503
+
+    # Extract userId from query parameter
+    user_id = request.args.get('userId')
+    if not user_id:
+        return jsonify({'error': 'userId is required'}), 400
+
+    # Verify the application exists for this user in DynamoDB
+    try:
+        response = applications_table.get_item(
+            Key={'userId': user_id, 'id': app_id}
+        )
+    except Exception as e:
+        return jsonify({'error': f'Database error: {str(e)}'}), 500
+
+    item = response.get('Item')
+    if not item:
+        return jsonify({'error': 'Application not found'}), 404
+
+    # Check userId ownership
+    if item.get('userId') != user_id:
+        return jsonify({'error': 'Insufficient permissions'}), 403
+
+    # Check that CV metadata exists
+    s3_key = item.get('cvS3Key')
+    filename = item.get('cvFilename')
+    if not s3_key or not filename:
+        return jsonify({'error': 'No CV associated with this application'}), 404
+
+    # Generate pre-signed URL
+    try:
+        url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': S3_BUCKET, 'Key': s3_key},
+            ExpiresIn=900  # 15 minutes
+        )
+        return jsonify({
+            'url': url,
+            'filename': filename
+        }), 200
+    except s3_client.exceptions.NoSuchKey:
+        return jsonify({'error': 'CV file not found in storage'}), 404
+    except Exception as e:
+        if 'NoSuchKey' in str(e):
+            return jsonify({'error': 'CV file not found in storage'}), 404
+        return jsonify({'error': 'Failed to generate download link'}), 503
+
+
+@app.route('/api/applications/<app_id>/cv', methods=['DELETE'])
+def delete_cv(app_id):
+    """Delete a CV file for a specific application"""
+    if not S3_AVAILABLE:
+        return jsonify({'error': 'Storage service is unavailable'}), 503
+
+    # Extract userId from query parameter
+    user_id = request.args.get('userId')
+    if not user_id:
+        return jsonify({'error': 'userId is required'}), 400
+
+    # Verify the application exists for this user in DynamoDB
+    try:
+        response = applications_table.get_item(
+            Key={'userId': user_id, 'id': app_id}
+        )
+    except Exception as e:
+        return jsonify({'error': f'Database error: {str(e)}'}), 500
+
+    item = response.get('Item')
+    if not item:
+        return jsonify({'error': 'Application not found'}), 404
+
+    # Check userId ownership
+    if item.get('userId') != user_id:
+        return jsonify({'error': 'Insufficient permissions'}), 403
+
+    # Check that CV metadata exists
+    s3_key = item.get('cvS3Key')
+    if not s3_key:
+        return jsonify({'error': 'No CV associated with this application'}), 404
+
+    # Delete from S3
+    try:
+        s3_client.delete_object(Bucket=S3_BUCKET, Key=s3_key)
+    except Exception as e:
+        return jsonify({'error': 'Failed to delete file from storage'}), 503
+
+    # Remove CV metadata from DynamoDB
+    try:
+        applications_table.update_item(
+            Key={'userId': user_id, 'id': app_id},
+            UpdateExpression='REMOVE cvS3Key, cvFilename'
+        )
+    except Exception as e:
+        return jsonify({'error': f'Partial failure: CV deleted from storage but metadata update failed: {str(e)}'}), 500
+
+    return jsonify({'status': 'ok'}), 200
+
 
 # ========== RUNBOOK API ==========
 
