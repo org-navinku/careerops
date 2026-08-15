@@ -173,6 +173,12 @@ def create_application():
             'baseCvVersion': data.get('baseCvVersion', ''),
             'timestamp': int(datetime.now(timezone.utc).timestamp())
         }
+
+        # Preserve CV file metadata if present in request data
+        if data.get('cvFilename'):
+            item['cvFilename'] = data['cvFilename']
+        if data.get('cvS3Key'):
+            item['cvS3Key'] = data['cvS3Key']
         
         applications_table.put_item(Item=dynamodb_safe(item))
         return jsonify({'status': 'ok', 'id': data.get('id')})
