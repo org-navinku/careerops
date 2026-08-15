@@ -112,6 +112,7 @@ create_dynamodb_tables() {
     log_section "Creating DynamoDB Tables"
     create_table "applications" "ApplicationTracking"
     create_table "runbook" "InterviewRunbook"
+    create_table "llm-providers" "LLMProviderConfiguration"
     log_success "DynamoDB tables ready"
 }
 
@@ -121,7 +122,7 @@ verify_deployment() {
     local tables
     tables=$(aws dynamodb list-tables --region "$REGION" --query 'TableNames' --output text)
 
-    for table_name in applications runbook; do
+    for table_name in applications runbook llm-providers; do
         if echo "$tables" | grep -q "$table_name"; then
             log_success "'$table_name' table found"
         else

@@ -396,50 +396,48 @@
   <!-- SETTINGS VIEW -->
   <div class="view" id="view-settings">
     <h2 class="view-title">Settings</h2>
-    <p class="view-desc">Configure LLM backend and generation settings.</p>
+    <p class="view-desc">Configure LLM providers. API keys are encrypted and stored server-side — never in your browser.</p>
 
+    <!-- Saved providers list -->
     <div class="panel">
-      <div class="panel-title">LLM Configuration</div>
+      <div class="panel-title">Saved providers</div>
+      <p class="view-desc" style="margin-bottom:12px;">Your configured LLM providers. The active one is used for generation.</p>
+      <div id="providersList" style="font-family:var(--mono);font-size:12px;"></div>
+    </div>
+
+    <!-- Add/edit provider form -->
+    <div class="panel">
+      <div class="panel-title" id="providerFormTitle">Add new provider</div>
       <div class="field">
-        <label>Backend type</label>
-        <select id="backendType">
-          <option value="ollama">Ollama (local)</option>
+        <label>Provider type</label>
+        <select id="providerType">
+          <option value="ollama">Ollama (local, no API key)</option>
           <option value="openai">OpenAI (ChatGPT)</option>
-          <option value="anthropic">Anthropic (Claude API)</option>
+          <option value="anthropic">Anthropic (Claude)</option>
           <option value="custom">Custom OpenAI-compatible</option>
         </select>
       </div>
 
-      <div id="ollamaConfig" style="display:block;">
+      <div id="providerOllamaFields">
         <div class="field">
           <label>Ollama base URL</label>
-          <input type="text" id="ollamaBase" placeholder="server default" value="">
-          <div class="muted-note">Where Ollama is running</div>
-        </div>
-        <div class="field">
-          <label>Model name</label>
-          <input type="text" id="ollamaModel" placeholder="mistral" value="mistral">
-          <div class="muted-note">Must be already pulled in Ollama</div>
-        </div>
-      </div>
-
-      <div id="anthropicConfig" style="display:none;">
-        <div class="field">
-          <label>API Key</label>
-          <input type="password" id="anthropicKey" placeholder="sk-ant-...">
-          <div class="muted-note">Stored in browser localStorage (not secure)</div>
-        </div>
-      </div>
-
-      <div id="openaiConfig" style="display:none;">
-        <div class="field">
-          <label>API Key</label>
-          <input type="password" id="openaiKey" placeholder="sk-...">
-          <div class="muted-note">Your OpenAI API key — stored in browser localStorage</div>
+          <input type="text" id="providerOllamaBase" placeholder="http://localhost:11434 (default)">
         </div>
         <div class="field">
           <label>Model</label>
-          <select id="openaiModel">
+          <input type="text" id="providerOllamaModel" placeholder="mistral" value="mistral">
+        </div>
+      </div>
+
+      <div id="providerOpenaiFields" style="display:none;">
+        <div class="field">
+          <label>API Key</label>
+          <input type="password" id="providerOpenaiKey" placeholder="sk-...">
+          <div class="muted-note">Sent once to the server, encrypted, never stored in browser.</div>
+        </div>
+        <div class="field">
+          <label>Model</label>
+          <select id="providerOpenaiModel">
             <option value="gpt-4o">GPT-4o (recommended)</option>
             <option value="gpt-4o-mini">GPT-4o Mini (faster, cheaper)</option>
             <option value="gpt-4-turbo">GPT-4 Turbo</option>
@@ -448,37 +446,50 @@
         </div>
       </div>
 
-      <div id="customConfig" style="display:none;">
+      <div id="providerAnthropicFields" style="display:none;">
+        <div class="field">
+          <label>API Key</label>
+          <input type="password" id="providerAnthropicKey" placeholder="sk-ant-...">
+          <div class="muted-note">Sent once to the server, encrypted, never stored in browser.</div>
+        </div>
+        <div class="field">
+          <label>Model</label>
+          <input type="text" id="providerAnthropicModel" placeholder="claude-3-5-sonnet-20241022" value="claude-3-5-sonnet-20241022">
+        </div>
+      </div>
+
+      <div id="providerCustomFields" style="display:none;">
         <div class="field">
           <label>API base URL</label>
-          <input type="text" id="customBase" placeholder="http://localhost:8000/v1">
+          <input type="text" id="providerCustomBase" placeholder="https://your-server.com/v1">
         </div>
         <div class="field">
           <label>API Key (if required)</label>
-          <input type="password" id="customKey" placeholder="optional">
+          <input type="password" id="providerCustomKey" placeholder="optional">
+          <div class="muted-note">Sent once to the server, encrypted, never stored in browser.</div>
         </div>
         <div class="field">
-          <label>Model name</label>
-          <input type="text" id="customModel" placeholder="gpt-3.5-turbo">
+          <label>Model</label>
+          <input type="text" id="providerCustomModel" placeholder="model-name">
         </div>
+      </div>
+
+      <div class="field">
+        <label><input type="checkbox" id="providerSetActive" checked> Set as active provider</label>
       </div>
 
       <div class="btn-row">
-        <button class="btn primary" id="saveSettingsBtn">Save settings</button>
-        <span id="settingsSaveStatus" class="muted-note"></span>
+        <button class="btn primary" id="saveProviderBtn">Save provider</button>
+        <button class="btn ghost" id="cancelEditProviderBtn" style="display:none;">Cancel</button>
+        <span id="providerSaveStatus" class="muted-note"></span>
       </div>
     </div>
 
+    <!-- Connection status -->
     <div class="panel">
       <div class="panel-title">Connection status</div>
       <div id="healthStatus" style="font-family:var(--mono);font-size:13px;color:var(--muted);padding:12px;"></div>
       <button class="btn" id="testConnectionBtn" style="margin-top:8px;">Test connection</button>
-    </div>
-
-    <div class="panel">
-      <div class="panel-title">Settings history</div>
-      <p class="view-desc" style="margin-bottom:12px;">Previously saved configs — click to restore.</p>
-      <div id="settingsHistoryList" style="font-family:var(--mono);font-size:12px;"></div>
     </div>
   </div>
 
@@ -755,10 +766,11 @@ let currentRtab = 'cv';
 // LLM configuration
 let llmConfig = {
   type: 'ollama',
+  activeProviderId: null,
   ollama: { base: '', model: 'mistral' },
-  openai: { key: '', model: 'gpt-4o' },
-  anthropic: { key: '' },
-  custom: { base: '', key: '', model: '' }
+  openai: { model: 'gpt-4o' },
+  anthropic: { model: '' },
+  custom: { base: '', model: '' }
 };
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
@@ -794,12 +806,8 @@ async function init(){
   }catch(e){ console.error('Failed to sync applications from DynamoDB:', e); }
   try{ runbook = JSON.parse(await sget('runbook') || '{}'); }catch(e){ runbook = {}; }
 
-  // Load LLM config
-  const savedConfig = await sget('llm-config');
-  if(savedConfig){
-    try{ llmConfig = JSON.parse(savedConfig); }catch(e){ }
-  }
-  loadSettingsUI();
+  // Load LLM providers from backend (secure, not localStorage)
+  await loadProviders();
 
   renderPipeline();
   renderRunbookSelectors();
@@ -826,57 +834,180 @@ function updateProfileStatus(){
   el.textContent = baseCv.trim() ? 'base profile loaded' : 'base profile not set';
 }
 
-// ---------- SETTINGS VIEW ----------
-function loadSettingsUI(){
-  document.getElementById('backendType').value = llmConfig.type;
-  document.getElementById('ollamaBase').value = llmConfig.ollama.base;
-  document.getElementById('ollamaModel').value = llmConfig.ollama.model;
-  document.getElementById('openaiKey').value = (llmConfig.openai || {}).key || '';
-  document.getElementById('openaiModel').value = (llmConfig.openai || {}).model || 'gpt-4o';
-  document.getElementById('anthropicKey').value = llmConfig.anthropic.key;
-  document.getElementById('customBase').value = llmConfig.custom.base;
-  document.getElementById('customKey').value = llmConfig.custom.key;
-  document.getElementById('customModel').value = llmConfig.custom.model;
-  updateSettingsUI();
+// ---------- SETTINGS VIEW (Secure Provider Management) ----------
+let savedProviders = [];
+let editingProviderId = null;
+
+async function loadProviders(){
+  try{
+    const items = await apiRequest(`/api/llm-providers?userId=${encodeURIComponent(storageUserId())}`);
+    savedProviders = items || [];
+    renderProvidersList();
+    // Update llmConfig from active provider
+    const active = savedProviders.find(p => p.isActive);
+    if(active){
+      llmConfig.type = active.provider;
+      if(active.provider === 'ollama'){
+        llmConfig.ollama = { base: active.baseUrl || '', model: active.model || 'mistral' };
+      } else if(active.provider === 'openai'){
+        llmConfig.openai = { model: active.model || 'gpt-4o' };
+      } else if(active.provider === 'anthropic'){
+        llmConfig.anthropic = { model: active.model || '' };
+      } else if(active.provider === 'custom'){
+        llmConfig.custom = { base: active.baseUrl || '', model: active.model || '' };
+      }
+      llmConfig.activeProviderId = active.id;
+    }
+  }catch(e){ console.error('Failed to load providers:', e); }
 }
 
-function updateSettingsUI(){
-  const type = document.getElementById('backendType').value;
-  document.getElementById('ollamaConfig').style.display = type === 'ollama' ? 'block' : 'none';
-  document.getElementById('openaiConfig').style.display = type === 'openai' ? 'block' : 'none';
-  document.getElementById('anthropicConfig').style.display = type === 'anthropic' ? 'block' : 'none';
-  document.getElementById('customConfig').style.display = type === 'custom' ? 'block' : 'none';
+function renderProvidersList(){
+  const container = document.getElementById('providersList');
+  if(!savedProviders.length){
+    container.innerHTML = '<span class="muted-note">No providers configured yet. Add one below.</span>';
+    return;
+  }
+  container.innerHTML = savedProviders.map(p => {
+    const isActive = p.isActive;
+    const keyInfo = p.apiKeyMasked ? `Key: ${escapeHtml(p.apiKeyMasked)}` : (p.provider === 'ollama' ? 'No key needed' : 'No key set');
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid ${isActive ? 'var(--teal)' : 'var(--line)'};border-radius:6px;margin-bottom:8px;background:${isActive ? 'rgba(45,212,191,.06)' : 'var(--panel-2)'};">
+      <div style="flex:1;">
+        <div style="color:${isActive ? 'var(--teal)' : 'var(--text)'};font-weight:500;">${escapeHtml(p.label || p.provider)}${isActive ? ' <span style="opacity:.6;font-weight:400;">(active)</span>' : ''}</div>
+        <div style="color:var(--muted);font-size:11px;margin-top:2px;">${escapeHtml(p.provider)} · ${escapeHtml(p.model || 'default')} · ${keyInfo}</div>
+      </div>
+      ${!isActive ? `<button class="btn ghost" onclick="activateProvider('${escapeAttr(p.id)}')" style="font-size:11px;padding:5px 10px;color:var(--teal);">Activate</button>` : ''}
+      <button class="btn ghost" onclick="deleteProvider('${escapeAttr(p.id)}')" style="font-size:11px;padding:5px 8px;color:var(--red);" title="Delete">✕</button>
+    </div>`;
+  }).join('');
 }
 
-document.getElementById('backendType').addEventListener('change', updateSettingsUI);
+function updateProviderFormFields(){
+  const type = document.getElementById('providerType').value;
+  document.getElementById('providerOllamaFields').style.display = type === 'ollama' ? 'block' : 'none';
+  document.getElementById('providerOpenaiFields').style.display = type === 'openai' ? 'block' : 'none';
+  document.getElementById('providerAnthropicFields').style.display = type === 'anthropic' ? 'block' : 'none';
+  document.getElementById('providerCustomFields').style.display = type === 'custom' ? 'block' : 'none';
+}
 
-document.getElementById('saveSettingsBtn').addEventListener('click', async ()=>{
-  const type = document.getElementById('backendType').value;
-  llmConfig = {
-    type,
-    ollama: { base: document.getElementById('ollamaBase').value, model: document.getElementById('ollamaModel').value },
-    openai: { key: document.getElementById('openaiKey').value, model: document.getElementById('openaiModel').value },
-    anthropic: { key: document.getElementById('anthropicKey').value },
-    custom: { base: document.getElementById('customBase').value, key: document.getElementById('customKey').value, model: document.getElementById('customModel').value }
+document.getElementById('providerType').addEventListener('change', updateProviderFormFields);
+
+document.getElementById('saveProviderBtn').addEventListener('click', async ()=>{
+  const type = document.getElementById('providerType').value;
+  const btn = document.getElementById('saveProviderBtn');
+  const statusEl = document.getElementById('providerSaveStatus');
+  btn.disabled = true;
+
+  let payload = {
+    userId: storageUserId(),
+    provider: type,
+    isActive: document.getElementById('providerSetActive').checked
   };
 
-  // Save to settings history
-  saveSettingsToHistory(llmConfig);
+  if(editingProviderId) payload.id = editingProviderId;
 
-  const result = await sset('llm-config', JSON.stringify(llmConfig));
-  const statusEl = document.getElementById('settingsSaveStatus');
-  if(result){
+  if(type === 'ollama'){
+    payload.baseUrl = document.getElementById('providerOllamaBase').value.trim();
+    payload.model = document.getElementById('providerOllamaModel').value.trim() || 'mistral';
+    payload.label = `Ollama — ${payload.model}`;
+  } else if(type === 'openai'){
+    payload.apiKey = document.getElementById('providerOpenaiKey').value.trim();
+    payload.model = document.getElementById('providerOpenaiModel').value;
+    payload.label = `OpenAI — ${payload.model}`;
+    if(!payload.apiKey && !editingProviderId){
+      toast('API key is required for OpenAI.', true);
+      btn.disabled = false;
+      return;
+    }
+  } else if(type === 'anthropic'){
+    payload.apiKey = document.getElementById('providerAnthropicKey').value.trim();
+    payload.model = document.getElementById('providerAnthropicModel').value.trim() || 'claude-3-5-sonnet-20241022';
+    payload.label = `Anthropic — ${payload.model}`;
+    if(!payload.apiKey && !editingProviderId){
+      toast('API key is required for Anthropic.', true);
+      btn.disabled = false;
+      return;
+    }
+  } else if(type === 'custom'){
+    payload.baseUrl = document.getElementById('providerCustomBase').value.trim();
+    payload.apiKey = document.getElementById('providerCustomKey').value.trim();
+    payload.model = document.getElementById('providerCustomModel').value.trim();
+    payload.label = `Custom — ${payload.model || payload.baseUrl || '?'}`;
+    if(!payload.baseUrl){
+      toast('Base URL is required for custom providers.', true);
+      btn.disabled = false;
+      return;
+    }
+  }
+
+  try{
+    const result = await apiRequest('/api/llm-providers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if(result.error){ throw new Error(result.error); }
     statusEl.textContent = 'saved ✓';
     statusEl.style.color = 'var(--teal)';
-    toast('Settings saved');
-  } else {
-    statusEl.textContent = 'save failed';
+    toast('Provider saved securely ✓');
+    resetProviderForm();
+    await loadProviders();
+  }catch(err){
+    statusEl.textContent = 'failed';
     statusEl.style.color = 'var(--red)';
-    toast('Could not save settings', true);
+    toast(`Save failed: ${err.message}`, true);
   }
+  btn.disabled = false;
   setTimeout(()=>{ statusEl.textContent = ''; statusEl.style.color = ''; }, 3000);
-  renderSettingsHistory();
 });
+
+document.getElementById('cancelEditProviderBtn').addEventListener('click', ()=>{
+  resetProviderForm();
+});
+
+function resetProviderForm(){
+  editingProviderId = null;
+  document.getElementById('providerFormTitle').textContent = 'Add new provider';
+  document.getElementById('cancelEditProviderBtn').style.display = 'none';
+  document.getElementById('providerType').value = 'ollama';
+  document.getElementById('providerOllamaBase').value = '';
+  document.getElementById('providerOllamaModel').value = 'mistral';
+  document.getElementById('providerOpenaiKey').value = '';
+  document.getElementById('providerOpenaiModel').value = 'gpt-4o';
+  document.getElementById('providerAnthropicKey').value = '';
+  document.getElementById('providerAnthropicModel').value = 'claude-3-5-sonnet-20241022';
+  document.getElementById('providerCustomBase').value = '';
+  document.getElementById('providerCustomKey').value = '';
+  document.getElementById('providerCustomModel').value = '';
+  document.getElementById('providerSetActive').checked = true;
+  updateProviderFormFields();
+}
+
+async function activateProvider(configId){
+  try{
+    await apiRequest(`/api/llm-providers/${encodeURIComponent(configId)}/activate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: storageUserId() })
+    });
+    toast('Provider activated ✓');
+    await loadProviders();
+  }catch(err){
+    toast(`Activation failed: ${err.message}`, true);
+  }
+}
+
+async function deleteProvider(configId){
+  if(!confirm('Delete this provider configuration?')) return;
+  try{
+    await apiRequest(`/api/llm-providers/${encodeURIComponent(configId)}?userId=${encodeURIComponent(storageUserId())}`, {
+      method: 'DELETE'
+    });
+    toast('Provider deleted');
+    await loadProviders();
+  }catch(err){
+    toast(`Delete failed: ${err.message}`, true);
+  }
+}
 
 document.getElementById('testConnectionBtn').addEventListener('click', checkHealth);
 
@@ -884,13 +1015,12 @@ async function checkHealth(){
   const statusEl = document.getElementById('healthStatus');
   statusEl.innerHTML = '<span class="spinner" style="display:inline-block;vertical-align:middle;"></span> checking...';
   try{
-    const endpoint = llmConfig.type === 'ollama'
-      ? '/api/health'
-      : llmConfig.type === 'anthropic' ? '/api/health'
-      : `${llmConfig.custom.base}/../models`;
-    const r = await fetch(endpoint, { timeout: 5000 });
+    const r = await fetch('/api/health');
     if(r.ok){
-      statusEl.innerHTML = `<span style="color:var(--green);">✓ Connected to ${llmConfig.type} backend</span>`;
+      const data = await r.json();
+      const activeProvider = savedProviders.find(p => p.isActive);
+      const providerLabel = activeProvider ? activeProvider.label : 'Ollama (default)';
+      statusEl.innerHTML = `<span style="color:var(--green);">✓ Backend connected</span><br><span style="color:var(--muted);font-size:11px;">Active: ${escapeHtml(providerLabel)}</span>`;
     } else {
       statusEl.innerHTML = `<span style="color:var(--red);">✗ Backend returned ${r.status}</span>`;
     }
@@ -899,93 +1029,8 @@ async function checkHealth(){
   }
 }
 
-// ---------- SETTINGS HISTORY ----------
-function getSettingsHistory(){
-  try{
-    return JSON.parse(localStorage.getItem('llm-settings-history') || '[]');
-  }catch(e){ return []; }
-}
-
-function saveSettingsToHistory(config){
-  const history = getSettingsHistory();
-  // Generate a descriptive label
-  let label = config.type;
-  if(config.type === 'ollama') label = `Ollama — ${config.ollama.model || 'default'}`;
-  else if(config.type === 'openai') label = `OpenAI — ${config.openai.model || 'gpt-4o'}`;
-  else if(config.type === 'anthropic') label = 'Anthropic (Claude)';
-  else if(config.type === 'custom') label = `Custom — ${config.custom.model || config.custom.base || '?'}`;
-
-  // Avoid duplicates (same type+model combo)
-  const fingerprint = JSON.stringify({ type: config.type, ollama: config.ollama, openai: { model: (config.openai||{}).model }, custom: { base: (config.custom||{}).base, model: (config.custom||{}).model }});
-  const exists = history.findIndex(h => {
-    const hfp = JSON.stringify({ type: h.config.type, ollama: h.config.ollama, openai: { model: (h.config.openai||{}).model }, custom: { base: (h.config.custom||{}).base, model: (h.config.custom||{}).model }});
-    return hfp === fingerprint;
-  });
-
-  if(exists >= 0){
-    // Update timestamp
-    history[exists].savedAt = new Date().toISOString();
-    history.unshift(history.splice(exists, 1)[0]);
-  } else {
-    history.unshift({
-      label,
-      config: JSON.parse(JSON.stringify(config)),
-      savedAt: new Date().toISOString()
-    });
-  }
-
-  // Keep max 10 entries
-  if(history.length > 10) history.length = 10;
-  localStorage.setItem('llm-settings-history', JSON.stringify(history));
-}
-
-function renderSettingsHistory(){
-  const container = document.getElementById('settingsHistoryList');
-  const history = getSettingsHistory();
-  if(!history.length){
-    container.innerHTML = '<span class="muted-note">No saved configurations yet. Save settings to build history.</span>';
-    return;
-  }
-  container.innerHTML = history.map((h, idx) => {
-    const date = new Date(h.savedAt).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'2-digit', hour:'2-digit', minute:'2-digit' });
-    const isActive = JSON.stringify({ type: llmConfig.type, model: llmConfig[llmConfig.type]?.model || '' }) ===
-                     JSON.stringify({ type: h.config.type, model: h.config[h.config.type]?.model || '' });
-    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid ${isActive ? 'var(--teal)' : 'var(--line)'};border-radius:6px;margin-bottom:6px;background:${isActive ? 'rgba(45,212,191,.06)' : 'var(--panel-2)'};">
-      <span style="flex:1;color:${isActive ? 'var(--teal)' : 'var(--text)'};">${escapeHtml(h.label)}${isActive ? ' <span style="opacity:.6;">(active)</span>' : ''}</span>
-      <span style="color:var(--muted);font-size:11px;">${date}</span>
-      ${!isActive ? `<button class="btn ghost" onclick="restoreSettingsFromHistory(${idx})" style="font-size:11px;padding:4px 8px;">Restore</button>` : ''}
-      <button class="btn ghost" onclick="deleteSettingsFromHistory(${idx})" style="font-size:11px;padding:4px 8px;color:var(--red);">✕</button>
-    </div>`;
-  }).join('');
-}
-
-async function restoreSettingsFromHistory(idx){
-  const history = getSettingsHistory();
-  if(!history[idx]) return;
-  const restored = history[idx].config;
-  // Merge with defaults to handle missing keys
-  llmConfig = {
-    type: restored.type || 'ollama',
-    ollama: restored.ollama || { base: '', model: 'mistral' },
-    openai: restored.openai || { key: '', model: 'gpt-4o' },
-    anthropic: restored.anthropic || { key: '' },
-    custom: restored.custom || { base: '', key: '', model: '' }
-  };
-  loadSettingsUI();
-  await sset('llm-config', JSON.stringify(llmConfig));
-  toast(`Restored: ${history[idx].label}`);
-  renderSettingsHistory();
-}
-
-function deleteSettingsFromHistory(idx){
-  const history = getSettingsHistory();
-  history.splice(idx, 1);
-  localStorage.setItem('llm-settings-history', JSON.stringify(history));
-  renderSettingsHistory();
-}
-
-// Render history on settings load
-setTimeout(renderSettingsHistory, 100);
+// Load providers on init
+setTimeout(loadProviders, 200);
 
 // ---------- PROFILE VIEW ----------
 if(window['pdfjsLib']){
@@ -1369,54 +1414,36 @@ function assembleCvMarkdown(parsed, llmSummary, llmRoleBullets){
 }
 
 async function callLlm(userMsg, systemMsg, maxTokens){
-  if(llmConfig.type === 'ollama'){
-    // Use local backend that proxies to Ollama
-    const body = { model: llmConfig.ollama.model, max_tokens: maxTokens, user_message: userMsg, provider: 'ollama' };
-    if(systemMsg) body.system = systemMsg;
-    const headers = { 'Content-Type': 'application/json' };
-    if(llmConfig.ollama.base.trim()) headers['X-Ollama-Base'] = llmConfig.ollama.base.trim();
-    const r = await fetch('/api/generate', {
-      method: 'POST', headers, body: JSON.stringify(body)
-    });
-    const d = await r.json();
-    if(!r.ok) throw new Error(d.error || `Backend error ${r.status}`);
-    const tb = (d.content || []).find(b => b.type === 'text');
-    if(!tb) throw new Error('No text response from model');
-    let clean = tb.text.trim().replace(/^```json/i,'').replace(/^```/,'').replace(/```$/,'').trim();
-    clean = clean.replace(/"((?:[^"\\]|\\.)*)"/g, (m, inner) => {
-      return '"' + inner.replace(/[\x00-\x1F\x7F]/g, ch => ({"\n":'\\n','\r':'\\r','\t':'\\t'}[ch]||'')) + '"';
-    });
-    return JSON.parse(clean);
-  } else if(llmConfig.type === 'openai'){
-    // Use backend that proxies to OpenAI API
-    if(!llmConfig.openai.key) throw new Error('OpenAI API key not set. Go to Settings to configure it.');
-    const body = {
-      provider: 'openai',
-      model: llmConfig.openai.model || 'gpt-4o',
-      max_tokens: maxTokens,
-      user_message: userMsg,
-      api_key: llmConfig.openai.key
-    };
-    if(systemMsg) body.system = systemMsg;
-    const r = await fetch('/api/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-    const d = await r.json();
-    if(!r.ok) throw new Error(d.error || `OpenAI error ${r.status}`);
-    const tb = (d.content || []).find(b => b.type === 'text');
-    if(!tb) throw new Error('No text response from model');
-    let clean = tb.text.trim().replace(/^```json/i,'').replace(/^```/,'').replace(/```$/,'').trim();
-    clean = clean.replace(/"((?:[^"\\]|\\.)*)"/g, (m, inner) => {
-      return '"' + inner.replace(/[\x00-\x1F\x7F]/g, ch => ({"\n":'\\n','\r':'\\r','\t':'\\t'}[ch]||'')) + '"';
-    });
-    return JSON.parse(clean);
-  } else if(llmConfig.type === 'anthropic'){
-    throw new Error('Anthropic integration not yet implemented. Use Ollama or OpenAI for now.');
-  } else if(llmConfig.type === 'custom'){
-    throw new Error('Custom backend integration not yet implemented. Use Ollama or OpenAI for now.');
+  // All LLM calls go through the backend which fetches keys server-side.
+  // Frontend never sends API keys — only the userId and provider config ID.
+  const body = {
+    provider: llmConfig.type || 'ollama',
+    model: llmConfig[llmConfig.type]?.model || llmConfig.ollama?.model || 'mistral',
+    max_tokens: maxTokens,
+    user_message: userMsg,
+    userId: storageUserId()
+  };
+  if(llmConfig.activeProviderId) body.providerId = llmConfig.activeProviderId;
+  if(systemMsg) body.system = systemMsg;
+
+  const headers = { 'Content-Type': 'application/json' };
+  // For Ollama, pass base URL hint (no secret)
+  if(llmConfig.type === 'ollama' && llmConfig.ollama?.base?.trim()){
+    headers['X-Ollama-Base'] = llmConfig.ollama.base.trim();
   }
+
+  const r = await fetch('/api/generate', {
+    method: 'POST', headers, body: JSON.stringify(body)
+  });
+  const d = await r.json();
+  if(!r.ok) throw new Error(d.error || `Backend error ${r.status}`);
+  const tb = (d.content || []).find(b => b.type === 'text');
+  if(!tb) throw new Error('No text response from model');
+  let clean = tb.text.trim().replace(/^```json/i,'').replace(/^```/,'').replace(/```$/,'').trim();
+  clean = clean.replace(/"((?:[^"\\]|\\.)*)"/g, (m, inner) => {
+    return '"' + inner.replace(/[\x00-\x1F\x7F]/g, ch => ({"\n":'\\n','\r':'\\r','\t':'\\t'}[ch]||'')) + '"';
+  });
+  return JSON.parse(clean);
 }
 
 async function generatePackage(){

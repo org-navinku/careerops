@@ -3,6 +3,7 @@ import os
 import re
 import json
 import hmac
+import base64
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import requests
@@ -10,6 +11,12 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import boto3
 from boto3.dynamodb.conditions import Key
+
+try:
+    from cryptography.fernet import Fernet
+    CRYPTO_AVAILABLE = True
+except ImportError:
+    CRYPTO_AVAILABLE = False
 
 try:
     from docx import Document
@@ -39,10 +46,53 @@ try:
     dynamodb = boto3.resource('dynamodb', region_name=AWS_REGION)
     applications_table = dynamodb.Table('applications')
     runbook_table = dynamodb.Table('runbook')
+    llm_providers_table = dynamodb.Table('llm-providers')
     DYNAMODB_AVAILABLE = True
 except Exception as e:
     print(f"⚠️  DynamoDB initialization failed: {e}")
     DYNAMODB_AVAILABLE = False
+
+# ---------- Encryption Setup ----------
+# Fernet symmetric encryption for API keys at rest.
+# Key source: CAREEROPS_ENCRYPTION_KEY env var (base64-encoded 32-byte key).
+# If not set, auto-generates one and prints it (you should persist it).
+ENCRYPTION_KEY = os.environ.get('CAREEROPS_ENCRYPTION_KEY', '')
+if ENCRYPTION_KEY and CRYPTO_AVAILABLE:
+    try:
+        fernet = Fernet(ENCRYPTION_KEY.encode())
+    except Exception as e:
+        print(f"⚠️  Invalid CAREEROPS_ENCRYPTION_KEY: {e}")
+        fernet = None
+elif CRYPTO_AVAILABLE:
+    # Auto-generate for development convenience (NOT for production)
+    generated_key = Fernet.generate_key().decode()
+    fernet = Fernet(generated_key.encode())
+    print(f"⚠️  No CAREEROPS_ENCRYPTION_KEY set. Auto-generated (non-persistent):")
+    print(f"   export CAREEROPS_ENCRYPTION_KEY={generated_key}")
+    print(f"   Add this to your environment to persist keys across restarts.\n")
+else:
+    fernet = None
+
+
+def encrypt_value(plaintext):
+    """Encrypt a string value. Returns base64-encoded ciphertext."""
+    if not fernet:
+        raise RuntimeError("Encryption not available. Install cryptography package and set CAREEROPS_ENCRYPTION_KEY.")
+    return fernet.encrypt(plaintext.encode()).decode()
+
+
+def decrypt_value(ciphertext):
+    """Decrypt a base64-encoded ciphertext. Returns plaintext string."""
+    if not fernet:
+        raise RuntimeError("Decryption not available. Install cryptography package and set CAREEROPS_ENCRYPTION_KEY.")
+    return fernet.decrypt(ciphertext.encode()).decode()
+
+
+def mask_key(key):
+    """Return a masked version of an API key for display (e.g., sk-...abc123)."""
+    if not key or len(key) < 8:
+        return '••••••••'
+    return key[:3] + '•' * (len(key) - 7) + key[-4:]
 
 # Initialize S3 client for CV file storage.
 S3_BUCKET = 'careerops-589535355002'
@@ -555,6 +605,206 @@ def extract_docx():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# ========== LLM PROVIDER CONFIGURATION (Secure) ==========
+
+@app.route('/api/llm-providers', methods=['GET'])
+def list_llm_providers():
+    """List all LLM provider configs for a user. API keys are masked."""
+    if not DYNAMODB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+
+    user_id = request.args.get('userId')
+    if not user_id:
+        return jsonify({'error': 'userId is required'}), 400
+
+    try:
+        response = llm_providers_table.query(
+            KeyConditionExpression=Key('userId').eq(user_id)
+        )
+        items = json_safe(response.get('Items', []))
+
+        # Mask API keys before returning
+        for item in items:
+            if item.get('apiKeyEncrypted'):
+                try:
+                    raw_key = decrypt_value(item['apiKeyEncrypted'])
+                    item['apiKeyMasked'] = mask_key(raw_key)
+                except Exception:
+                    item['apiKeyMasked'] = '••••••••'
+                del item['apiKeyEncrypted']
+            else:
+                item['apiKeyMasked'] = ''
+            item.pop('apiKeyEncrypted', None)
+
+        items = sorted(items, key=lambda x: x.get('updatedAt', ''), reverse=True)
+        return jsonify(items)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/llm-providers', methods=['POST'])
+def create_llm_provider():
+    """Create or update an LLM provider config. API key is encrypted at rest."""
+    if not DYNAMODB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    if not fernet:
+        return jsonify({'error': 'Encryption not available. Set CAREEROPS_ENCRYPTION_KEY env var.'}), 503
+
+    data = request.json
+    user_id = data.get('userId')
+    if not user_id:
+        return jsonify({'error': 'userId is required'}), 400
+
+    provider_type = data.get('provider', '').strip()
+    if not provider_type:
+        return jsonify({'error': 'provider is required (openai, anthropic, ollama, custom)'}), 400
+
+    config_id = data.get('id') or f"{provider_type}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+    api_key = data.get('apiKey', '')
+    model = data.get('model', '')
+    base_url = data.get('baseUrl', '')
+    label = data.get('label', '') or f"{provider_type} — {model or 'default'}"
+
+    item = {
+        'userId': user_id,
+        'id': config_id,
+        'provider': provider_type,
+        'model': model,
+        'baseUrl': base_url,
+        'label': label,
+        'isActive': data.get('isActive', False),
+        'updatedAt': datetime.now(timezone.utc).isoformat(),
+    }
+
+    # Encrypt API key if provided
+    if api_key:
+        item['apiKeyEncrypted'] = encrypt_value(api_key)
+
+    # If updating an existing provider and no new key provided, preserve existing encrypted key
+    if not api_key and data.get('id'):
+        try:
+            existing = llm_providers_table.get_item(Key={'userId': user_id, 'id': config_id})
+            existing_item = existing.get('Item')
+            if existing_item and existing_item.get('apiKeyEncrypted'):
+                item['apiKeyEncrypted'] = existing_item['apiKeyEncrypted']
+        except Exception:
+            pass
+
+    try:
+        llm_providers_table.put_item(Item=dynamodb_safe(item))
+
+        # If isActive, deactivate others
+        if data.get('isActive'):
+            response = llm_providers_table.query(
+                KeyConditionExpression=Key('userId').eq(user_id)
+            )
+            for other in response.get('Items', []):
+                if other['id'] != config_id and other.get('isActive'):
+                    llm_providers_table.update_item(
+                        Key={'userId': user_id, 'id': other['id']},
+                        UpdateExpression='SET isActive = :f',
+                        ExpressionAttributeValues={':f': False}
+                    )
+
+        return jsonify({
+            'status': 'ok',
+            'id': config_id,
+            'apiKeyMasked': mask_key(api_key) if api_key else ''
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/llm-providers/<config_id>', methods=['DELETE'])
+def delete_llm_provider(config_id):
+    """Delete an LLM provider config."""
+    if not DYNAMODB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+
+    user_id = request.args.get('userId')
+    if not user_id:
+        return jsonify({'error': 'userId is required'}), 400
+
+    try:
+        llm_providers_table.delete_item(Key={'userId': user_id, 'id': config_id})
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/llm-providers/<config_id>/activate', methods=['POST'])
+def activate_llm_provider(config_id):
+    """Set a provider config as the active one (deactivates others)."""
+    if not DYNAMODB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+
+    data = request.json or {}
+    user_id = data.get('userId') or request.args.get('userId')
+    if not user_id:
+        return jsonify({'error': 'userId is required'}), 400
+
+    try:
+        # Verify it exists
+        existing = llm_providers_table.get_item(Key={'userId': user_id, 'id': config_id})
+        if not existing.get('Item'):
+            return jsonify({'error': 'Provider config not found'}), 404
+
+        # Deactivate all others
+        response = llm_providers_table.query(
+            KeyConditionExpression=Key('userId').eq(user_id)
+        )
+        for item in response.get('Items', []):
+            if item['id'] != config_id and item.get('isActive'):
+                llm_providers_table.update_item(
+                    Key={'userId': user_id, 'id': item['id']},
+                    UpdateExpression='SET isActive = :f',
+                    ExpressionAttributeValues={':f': False}
+                )
+
+        # Activate this one
+        llm_providers_table.update_item(
+            Key={'userId': user_id, 'id': config_id},
+            UpdateExpression='SET isActive = :t',
+            ExpressionAttributeValues={':t': True}
+        )
+
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+def get_active_provider_key(user_id):
+    """Fetch the decrypted API key for the active provider. Returns (key, provider_config) or (None, None)."""
+    if not DYNAMODB_AVAILABLE or not fernet:
+        return None, None
+    try:
+        response = llm_providers_table.query(
+            KeyConditionExpression=Key('userId').eq(user_id)
+        )
+        for item in response.get('Items', []):
+            if item.get('isActive') and item.get('apiKeyEncrypted'):
+                key = decrypt_value(item['apiKeyEncrypted'])
+                return key, json_safe(item)
+        return None, None
+    except Exception:
+        return None, None
+
+
+def get_provider_key_by_id(user_id, config_id):
+    """Fetch the decrypted API key for a specific provider config."""
+    if not DYNAMODB_AVAILABLE or not fernet:
+        return None, None
+    try:
+        response = llm_providers_table.get_item(Key={'userId': user_id, 'id': config_id})
+        item = response.get('Item')
+        if item and item.get('apiKeyEncrypted'):
+            key = decrypt_value(item['apiKeyEncrypted'])
+            return key, json_safe(item)
+        return None, json_safe(item) if item else None
+    except Exception:
+        return None, None
+
+
 # ========== LLM GENERATION ==========
 
 @app.route('/api/generate', methods=['POST'])
@@ -565,11 +815,33 @@ def generate():
         system = data.get('system', '')
         user_msg = data.get('user_message', '')
         model = data.get('model', MODEL)
+        user_id = data.get('userId', '')
+        provider_id = data.get('providerId', '')
 
-        if provider == 'openai':
-            return generate_openai(data, system, user_msg, model)
+        # For non-Ollama providers, fetch API key server-side from encrypted storage
+        if provider in ('openai', 'anthropic', 'custom'):
+            api_key = None
+            provider_config = None
 
-        # Default: Ollama
+            # Try to fetch key from DynamoDB by provider ID
+            if provider_id and user_id:
+                api_key, provider_config = get_provider_key_by_id(user_id, provider_id)
+            elif user_id:
+                api_key, provider_config = get_active_provider_key(user_id)
+
+            # Fallback to environment variable
+            if not api_key and provider == 'openai':
+                api_key = OPENAI_API_KEY
+
+            if provider == 'openai':
+                return generate_openai(data, system, user_msg, model, api_key)
+            elif provider == 'custom':
+                base_url = (provider_config or {}).get('baseUrl', '') if provider_config else ''
+                return generate_custom(data, system, user_msg, model, api_key, base_url)
+            else:
+                return jsonify({'error': f'Provider "{provider}" not yet supported for generation.'}), 400
+
+        # Default: Ollama (no API key needed)
         ollama_base = resolve_ollama_base(request.headers.get('X-Ollama-Base'))
 
         if not check_ollama_at(ollama_base):
@@ -631,11 +903,12 @@ def generate():
         return jsonify({'error': str(e)}), 500
 
 
-def generate_openai(data, system, user_msg, model):
-    """Handle OpenAI ChatGPT API calls."""
-    api_key = data.get('api_key', '') or OPENAI_API_KEY
+def generate_openai(data, system, user_msg, model, api_key=None):
+    """Handle OpenAI ChatGPT API calls. API key fetched server-side."""
     if not api_key:
-        return jsonify({'error': 'OpenAI API key not provided. Set it in Settings or as OPENAI_API_KEY env var.'}), 400
+        api_key = OPENAI_API_KEY
+    if not api_key:
+        return jsonify({'error': 'OpenAI API key not configured. Add one in Settings.'}), 400
 
     max_tokens = data.get('max_tokens', 12000)
     messages = []
@@ -703,6 +976,80 @@ def generate_openai(data, system, user_msg, model):
         return jsonify({'error': 'Cannot reach OpenAI API. Check your network connection.'}), 503
     except Exception as e:
         return jsonify({'error': f'OpenAI request failed: {str(e)}'}), 500
+
+
+def generate_custom(data, system, user_msg, model, api_key=None, base_url=''):
+    """Handle custom OpenAI-compatible API calls."""
+    if not base_url:
+        return jsonify({'error': 'Custom provider base URL not configured. Update it in Settings.'}), 400
+
+    max_tokens = data.get('max_tokens', 12000)
+    messages = []
+    if system:
+        messages.append({'role': 'system', 'content': system})
+    messages.append({'role': 'user', 'content': user_msg})
+
+    headers = {'Content-Type': 'application/json'}
+    if api_key:
+        headers['Authorization'] = f'Bearer {api_key}'
+
+    # Ensure base_url ends with /v1/chat/completions or similar
+    url = base_url.rstrip('/')
+    if not url.endswith('/chat/completions'):
+        url = url + '/chat/completions'
+
+    try:
+        response = requests.post(
+            url,
+            headers=headers,
+            json={
+                'model': model,
+                'messages': messages,
+                'temperature': 0.7,
+                'max_tokens': max_tokens,
+                'stream': False
+            },
+            timeout=180
+        )
+
+        if response.status_code != 200:
+            detail = response.text
+            try:
+                detail = response.json().get('error', {}).get('message', response.text)
+            except Exception:
+                pass
+            return jsonify({'error': f'Custom provider error ({response.status_code}): {detail}'}), response.status_code
+
+        result = response.json()
+        message_content = result['choices'][0]['message']['content']
+
+        def fix_json_strings(s):
+            def escape_inner(m):
+                inner = m.group(1)
+                inner = inner.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
+                return '"' + inner + '"'
+            return re.sub(r'"((?:[^"\\]|\\.)*)"', escape_inner, s, flags=re.DOTALL)
+
+        stripped = message_content.strip()
+        if stripped.startswith('```'):
+            stripped = re.sub(r'^```(?:json)?\s*', '', stripped)
+            stripped = re.sub(r'```\s*$', '', stripped).strip()
+        try:
+            json.loads(stripped)
+        except (json.JSONDecodeError, ValueError):
+            stripped = fix_json_strings(stripped)
+
+        return jsonify({
+            'content': [{'type': 'text', 'text': stripped}]
+        })
+
+    except requests.exceptions.Timeout:
+        return jsonify({'error': 'Custom provider request timed out.'}), 504
+    except requests.exceptions.ConnectionError:
+        return jsonify({'error': f'Cannot reach custom provider at {base_url}. Check the URL.'}), 503
+    except Exception as e:
+        return jsonify({'error': f'Custom provider request failed: {str(e)}'}), 500
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('FLASK_PORT', 5001))
