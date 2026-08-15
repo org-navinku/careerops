@@ -12,6 +12,7 @@ services:
     environment:
       - FLASK_ENV=production
       - FLASK_PORT=5001
+      - FLASK_HOST=0.0.0.0
       - OLLAMA_BASE=http://ollama:11434  # Ollama service (if using)
       - OLLAMA_MODEL=mistral
       - OPENAI_API_KEY=${OPENAI_API_KEY}
