@@ -7,26 +7,26 @@
 # - applications
 # - runbook
 #
-# Usage: ./deploy-dynamodb.sh [--region us-east-1]
+# Usage: ./deploy-dynamodb.sh [--region us-east-2]
 # ============================================================================
 
 set -e
 
-REGION="us-east-1"
+REGION="us-east-2"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --region)
-            REGION="${2:-us-east-1}"
+            REGION="${2:-us-east-2}"
             shift 2
             ;;
         -h|--help)
-            echo "Usage: ./deploy-dynamodb.sh [--region us-east-1]"
+            echo "Usage: ./deploy-dynamodb.sh [--region us-east-2]"
             exit 0
             ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: ./deploy-dynamodb.sh [--region us-east-1]"
+            echo "Usage: ./deploy-dynamodb.sh [--region us-east-2]"
             exit 1
             ;;
     esac

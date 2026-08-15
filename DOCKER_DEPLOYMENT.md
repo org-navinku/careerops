@@ -66,7 +66,7 @@ docker rm careerops
 
 ```bash
 # Set variables
-AWS_REGION="us-east-1"  # Change as needed
+AWS_REGION="us-east-2"  # Change as needed
 ECR_REPO_NAME="careerops"
 
 # Create repository
@@ -246,7 +246,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
+          aws-region: us-east-2
 
       - name: Login to ECR
         id: login-ecr
