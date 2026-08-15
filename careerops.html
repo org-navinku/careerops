@@ -1548,6 +1548,8 @@ Respond with ONLY valid JSON:
     }catch(e){
       console.warn('LLM failed, using original content:', e);
       llmResult = null;
+      // Show a warning toast so user knows LLM didn't run
+      toast(`⚠️ LLM unavailable: ${e.message}. Showing un-tailored CV.`, true);
     }
 
     // Step 3: Build role bullets map from LLM output (fall back to originals if LLM failed/truncated)
