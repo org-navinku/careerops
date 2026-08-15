@@ -857,13 +857,41 @@ async function loadProviders(){
         llmConfig.custom = { base: active.baseUrl || '', model: active.model || '' };
       }
       llmConfig.activeProviderId = active.id;
+      // Persist provider type preference locally (no secrets, just type+model)
+      localStorage.setItem('llm-provider-pref', JSON.stringify({ type: active.provider, model: active.model }));
     }
-  }catch(e){ console.error('Failed to load providers:', e); }
+  }catch(e){
+    console.error('Failed to load providers from backend:', e);
+    // Fallback: use localStorage provider preference (type+model only, no keys)
+    // Keys are resolved server-side via OPENAI_API_KEY env var
+    try{
+      const pref = JSON.parse(localStorage.getItem('llm-provider-pref') || 'null');
+      if(pref){
+        llmConfig.type = pref.type || 'ollama';
+        if(pref.type === 'openai') llmConfig.openai = { model: pref.model || 'gpt-4o' };
+        else if(pref.type === 'ollama') llmConfig.ollama = { base: '', model: pref.model || 'mistral' };
+      }
+    }catch(e2){}
+    renderProvidersList();
+  }
 }
 
 function renderProvidersList(){
   const container = document.getElementById('providersList');
   if(!savedProviders.length){
+    // Show local preference if set
+    try{
+      const pref = JSON.parse(localStorage.getItem('llm-provider-pref') || 'null');
+      if(pref){
+        container.innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid var(--amber);border-radius:6px;margin-bottom:8px;background:rgba(245,166,35,.06);">
+          <div style="flex:1;">
+            <div style="color:var(--amber);font-weight:500;">${escapeHtml(pref.type)} — ${escapeHtml(pref.model || 'default')} <span style="opacity:.6;font-weight:400;">(active, local)</span></div>
+            <div style="color:var(--muted);font-size:11px;margin-top:2px;">API key via server env var · DB not connected</div>
+          </div>
+        </div>`;
+        return;
+      }
+    }catch(e){}
     container.innerHTML = '<span class="muted-note">No providers configured yet. Add one below.</span>';
     return;
   }
@@ -913,20 +941,10 @@ document.getElementById('saveProviderBtn').addEventListener('click', async ()=>{
     payload.apiKey = document.getElementById('providerOpenaiKey').value.trim();
     payload.model = document.getElementById('providerOpenaiModel').value;
     payload.label = `OpenAI — ${payload.model}`;
-    if(!payload.apiKey && !editingProviderId){
-      toast('API key is required for OpenAI.', true);
-      btn.disabled = false;
-      return;
-    }
   } else if(type === 'anthropic'){
     payload.apiKey = document.getElementById('providerAnthropicKey').value.trim();
     payload.model = document.getElementById('providerAnthropicModel').value.trim() || 'claude-3-5-sonnet-20241022';
     payload.label = `Anthropic — ${payload.model}`;
-    if(!payload.apiKey && !editingProviderId){
-      toast('API key is required for Anthropic.', true);
-      btn.disabled = false;
-      return;
-    }
   } else if(type === 'custom'){
     payload.baseUrl = document.getElementById('providerCustomBase').value.trim();
     payload.apiKey = document.getElementById('providerCustomKey').value.trim();
@@ -952,9 +970,18 @@ document.getElementById('saveProviderBtn').addEventListener('click', async ()=>{
     resetProviderForm();
     await loadProviders();
   }catch(err){
-    statusEl.textContent = 'failed';
-    statusEl.style.color = 'var(--red)';
-    toast(`Save failed: ${err.message}`, true);
+    // Save provider type preference locally (no secrets) so generation still works
+    // API key will be resolved server-side via env var
+    localStorage.setItem('llm-provider-pref', JSON.stringify({ type: payload.provider, model: payload.model }));
+    llmConfig.type = payload.provider;
+    if(payload.provider === 'openai') llmConfig.openai = { model: payload.model || 'gpt-4o' };
+    else if(payload.provider === 'ollama') llmConfig.ollama = { base: payload.baseUrl || '', model: payload.model || 'mistral' };
+    else if(payload.provider === 'custom') llmConfig.custom = { base: payload.baseUrl || '', model: payload.model || '' };
+
+    statusEl.textContent = 'saved locally ✓';
+    statusEl.style.color = 'var(--amber)';
+    toast('Provider preference saved (API key must be set via env var on server)');
+    renderProvidersList();
   }
   btn.disabled = false;
   setTimeout(()=>{ statusEl.textContent = ''; statusEl.style.color = ''; }, 3000);
