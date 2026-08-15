@@ -164,6 +164,8 @@ def create_application():
             'atsScore': data.get('atsScore'),
             'skills': data.get('skills', []),
             'notes': data.get('notes', ''),
+            'emailSubject': data.get('emailSubject', ''),
+            'emailTo': data.get('emailTo', ''),
             'tailoredCV': data.get('tailoredCV', ''),
             'coverLetter': data.get('coverLetter', ''),
             'emailDraft': data.get('emailDraft', ''),

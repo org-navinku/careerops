@@ -3,3 +3,4 @@ flask-cors==4.0.0
 requests==2.31.0
 python-docx==0.8.11
 boto3==1.28.0
+hypothesis==6.100.3
