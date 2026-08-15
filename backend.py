@@ -561,10 +561,15 @@ def extract_docx():
 def generate():
     try:
         data = request.json
+        provider = data.get('provider', 'ollama')
         system = data.get('system', '')
         user_msg = data.get('user_message', '')
         model = data.get('model', MODEL)
 
+        if provider == 'openai':
+            return generate_openai(data, system, user_msg, model)
+
+        # Default: Ollama
         ollama_base = resolve_ollama_base(request.headers.get('X-Ollama-Base'))
 
         if not check_ollama_at(ollama_base):
@@ -621,9 +626,83 @@ def generate():
         })
 
     except requests.exceptions.Timeout:
-        return jsonify({'error': 'Ollama request timed out (model may still be loading)'}), 504
+        return jsonify({'error': 'Request timed out (model may still be loading)'}), 504
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+def generate_openai(data, system, user_msg, model):
+    """Handle OpenAI ChatGPT API calls."""
+    api_key = data.get('api_key', '') or OPENAI_API_KEY
+    if not api_key:
+        return jsonify({'error': 'OpenAI API key not provided. Set it in Settings or as OPENAI_API_KEY env var.'}), 400
+
+    max_tokens = data.get('max_tokens', 12000)
+    messages = []
+    if system:
+        messages.append({'role': 'system', 'content': system})
+    messages.append({'role': 'user', 'content': user_msg})
+
+    try:
+        response = requests.post(
+            'https://api.openai.com/v1/chat/completions',
+            headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {api_key}'
+            },
+            json={
+                'model': model,
+                'messages': messages,
+                'temperature': 0.7,
+                'max_tokens': max_tokens,
+                'stream': False
+            },
+            timeout=180
+        )
+
+        if response.status_code == 401:
+            return jsonify({'error': 'Invalid OpenAI API key. Check your key in Settings.'}), 401
+        if response.status_code == 429:
+            return jsonify({'error': 'OpenAI rate limit exceeded. Wait a moment and try again.'}), 429
+        if response.status_code == 404:
+            return jsonify({'error': f'Model "{model}" not found. Check your OpenAI plan supports this model.'}), 404
+        if response.status_code != 200:
+            detail = response.text
+            try:
+                detail = response.json().get('error', {}).get('message', response.text)
+            except Exception:
+                pass
+            return jsonify({'error': f'OpenAI error ({response.status_code}): {detail}'}), response.status_code
+
+        result = response.json()
+        message_content = result['choices'][0]['message']['content']
+
+        def fix_json_strings(s):
+            def escape_inner(m):
+                inner = m.group(1)
+                inner = inner.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
+                return '"' + inner + '"'
+            return re.sub(r'"((?:[^"\\]|\\.)*)"', escape_inner, s, flags=re.DOTALL)
+
+        stripped = message_content.strip()
+        if stripped.startswith('```'):
+            stripped = re.sub(r'^```(?:json)?\s*', '', stripped)
+            stripped = re.sub(r'```\s*$', '', stripped).strip()
+        try:
+            json.loads(stripped)
+        except (json.JSONDecodeError, ValueError):
+            stripped = fix_json_strings(stripped)
+
+        return jsonify({
+            'content': [{'type': 'text', 'text': stripped}]
+        })
+
+    except requests.exceptions.Timeout:
+        return jsonify({'error': 'OpenAI request timed out. Try again.'}), 504
+    except requests.exceptions.ConnectionError:
+        return jsonify({'error': 'Cannot reach OpenAI API. Check your network connection.'}), 503
+    except Exception as e:
+        return jsonify({'error': f'OpenAI request failed: {str(e)}'}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('FLASK_PORT', 5001))

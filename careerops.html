@@ -404,6 +404,7 @@
         <label>Backend type</label>
         <select id="backendType">
           <option value="ollama">Ollama (local)</option>
+          <option value="openai">OpenAI (ChatGPT)</option>
           <option value="anthropic">Anthropic (Claude API)</option>
           <option value="custom">Custom OpenAI-compatible</option>
         </select>
@@ -427,6 +428,23 @@
           <label>API Key</label>
           <input type="password" id="anthropicKey" placeholder="sk-ant-...">
           <div class="muted-note">Stored in browser localStorage (not secure)</div>
+        </div>
+      </div>
+
+      <div id="openaiConfig" style="display:none;">
+        <div class="field">
+          <label>API Key</label>
+          <input type="password" id="openaiKey" placeholder="sk-...">
+          <div class="muted-note">Your OpenAI API key — stored in browser localStorage</div>
+        </div>
+        <div class="field">
+          <label>Model</label>
+          <select id="openaiModel">
+            <option value="gpt-4o">GPT-4o (recommended)</option>
+            <option value="gpt-4o-mini">GPT-4o Mini (faster, cheaper)</option>
+            <option value="gpt-4-turbo">GPT-4 Turbo</option>
+            <option value="gpt-3.5-turbo">GPT-3.5 Turbo (cheapest)</option>
+          </select>
         </div>
       </div>
 
@@ -455,6 +473,12 @@
       <div class="panel-title">Connection status</div>
       <div id="healthStatus" style="font-family:var(--mono);font-size:13px;color:var(--muted);padding:12px;"></div>
       <button class="btn" id="testConnectionBtn" style="margin-top:8px;">Test connection</button>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Settings history</div>
+      <p class="view-desc" style="margin-bottom:12px;">Previously saved configs — click to restore.</p>
+      <div id="settingsHistoryList" style="font-family:var(--mono);font-size:12px;"></div>
     </div>
   </div>
 
@@ -732,6 +756,7 @@ let currentRtab = 'cv';
 let llmConfig = {
   type: 'ollama',
   ollama: { base: '', model: 'mistral' },
+  openai: { key: '', model: 'gpt-4o' },
   anthropic: { key: '' },
   custom: { base: '', key: '', model: '' }
 };
@@ -806,6 +831,8 @@ function loadSettingsUI(){
   document.getElementById('backendType').value = llmConfig.type;
   document.getElementById('ollamaBase').value = llmConfig.ollama.base;
   document.getElementById('ollamaModel').value = llmConfig.ollama.model;
+  document.getElementById('openaiKey').value = (llmConfig.openai || {}).key || '';
+  document.getElementById('openaiModel').value = (llmConfig.openai || {}).model || 'gpt-4o';
   document.getElementById('anthropicKey').value = llmConfig.anthropic.key;
   document.getElementById('customBase').value = llmConfig.custom.base;
   document.getElementById('customKey').value = llmConfig.custom.key;
@@ -816,6 +843,7 @@ function loadSettingsUI(){
 function updateSettingsUI(){
   const type = document.getElementById('backendType').value;
   document.getElementById('ollamaConfig').style.display = type === 'ollama' ? 'block' : 'none';
+  document.getElementById('openaiConfig').style.display = type === 'openai' ? 'block' : 'none';
   document.getElementById('anthropicConfig').style.display = type === 'anthropic' ? 'block' : 'none';
   document.getElementById('customConfig').style.display = type === 'custom' ? 'block' : 'none';
 }
@@ -827,9 +855,14 @@ document.getElementById('saveSettingsBtn').addEventListener('click', async ()=>{
   llmConfig = {
     type,
     ollama: { base: document.getElementById('ollamaBase').value, model: document.getElementById('ollamaModel').value },
+    openai: { key: document.getElementById('openaiKey').value, model: document.getElementById('openaiModel').value },
     anthropic: { key: document.getElementById('anthropicKey').value },
     custom: { base: document.getElementById('customBase').value, key: document.getElementById('customKey').value, model: document.getElementById('customModel').value }
   };
+
+  // Save to settings history
+  saveSettingsToHistory(llmConfig);
+
   const result = await sset('llm-config', JSON.stringify(llmConfig));
   const statusEl = document.getElementById('settingsSaveStatus');
   if(result){
@@ -842,6 +875,7 @@ document.getElementById('saveSettingsBtn').addEventListener('click', async ()=>{
     toast('Could not save settings', true);
   }
   setTimeout(()=>{ statusEl.textContent = ''; statusEl.style.color = ''; }, 3000);
+  renderSettingsHistory();
 });
 
 document.getElementById('testConnectionBtn').addEventListener('click', checkHealth);
@@ -864,6 +898,94 @@ async function checkHealth(){
     statusEl.innerHTML = `<span style="color:var(--red);">✗ Could not reach backend: ${err.message}</span>`;
   }
 }
+
+// ---------- SETTINGS HISTORY ----------
+function getSettingsHistory(){
+  try{
+    return JSON.parse(localStorage.getItem('llm-settings-history') || '[]');
+  }catch(e){ return []; }
+}
+
+function saveSettingsToHistory(config){
+  const history = getSettingsHistory();
+  // Generate a descriptive label
+  let label = config.type;
+  if(config.type === 'ollama') label = `Ollama — ${config.ollama.model || 'default'}`;
+  else if(config.type === 'openai') label = `OpenAI — ${config.openai.model || 'gpt-4o'}`;
+  else if(config.type === 'anthropic') label = 'Anthropic (Claude)';
+  else if(config.type === 'custom') label = `Custom — ${config.custom.model || config.custom.base || '?'}`;
+
+  // Avoid duplicates (same type+model combo)
+  const fingerprint = JSON.stringify({ type: config.type, ollama: config.ollama, openai: { model: (config.openai||{}).model }, custom: { base: (config.custom||{}).base, model: (config.custom||{}).model }});
+  const exists = history.findIndex(h => {
+    const hfp = JSON.stringify({ type: h.config.type, ollama: h.config.ollama, openai: { model: (h.config.openai||{}).model }, custom: { base: (h.config.custom||{}).base, model: (h.config.custom||{}).model }});
+    return hfp === fingerprint;
+  });
+
+  if(exists >= 0){
+    // Update timestamp
+    history[exists].savedAt = new Date().toISOString();
+    history.unshift(history.splice(exists, 1)[0]);
+  } else {
+    history.unshift({
+      label,
+      config: JSON.parse(JSON.stringify(config)),
+      savedAt: new Date().toISOString()
+    });
+  }
+
+  // Keep max 10 entries
+  if(history.length > 10) history.length = 10;
+  localStorage.setItem('llm-settings-history', JSON.stringify(history));
+}
+
+function renderSettingsHistory(){
+  const container = document.getElementById('settingsHistoryList');
+  const history = getSettingsHistory();
+  if(!history.length){
+    container.innerHTML = '<span class="muted-note">No saved configurations yet. Save settings to build history.</span>';
+    return;
+  }
+  container.innerHTML = history.map((h, idx) => {
+    const date = new Date(h.savedAt).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'2-digit', hour:'2-digit', minute:'2-digit' });
+    const isActive = JSON.stringify({ type: llmConfig.type, model: llmConfig[llmConfig.type]?.model || '' }) ===
+                     JSON.stringify({ type: h.config.type, model: h.config[h.config.type]?.model || '' });
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid ${isActive ? 'var(--teal)' : 'var(--line)'};border-radius:6px;margin-bottom:6px;background:${isActive ? 'rgba(45,212,191,.06)' : 'var(--panel-2)'};">
+      <span style="flex:1;color:${isActive ? 'var(--teal)' : 'var(--text)'};">${escapeHtml(h.label)}${isActive ? ' <span style="opacity:.6;">(active)</span>' : ''}</span>
+      <span style="color:var(--muted);font-size:11px;">${date}</span>
+      ${!isActive ? `<button class="btn ghost" onclick="restoreSettingsFromHistory(${idx})" style="font-size:11px;padding:4px 8px;">Restore</button>` : ''}
+      <button class="btn ghost" onclick="deleteSettingsFromHistory(${idx})" style="font-size:11px;padding:4px 8px;color:var(--red);">✕</button>
+    </div>`;
+  }).join('');
+}
+
+async function restoreSettingsFromHistory(idx){
+  const history = getSettingsHistory();
+  if(!history[idx]) return;
+  const restored = history[idx].config;
+  // Merge with defaults to handle missing keys
+  llmConfig = {
+    type: restored.type || 'ollama',
+    ollama: restored.ollama || { base: '', model: 'mistral' },
+    openai: restored.openai || { key: '', model: 'gpt-4o' },
+    anthropic: restored.anthropic || { key: '' },
+    custom: restored.custom || { base: '', key: '', model: '' }
+  };
+  loadSettingsUI();
+  await sset('llm-config', JSON.stringify(llmConfig));
+  toast(`Restored: ${history[idx].label}`);
+  renderSettingsHistory();
+}
+
+function deleteSettingsFromHistory(idx){
+  const history = getSettingsHistory();
+  history.splice(idx, 1);
+  localStorage.setItem('llm-settings-history', JSON.stringify(history));
+  renderSettingsHistory();
+}
+
+// Render history on settings load
+setTimeout(renderSettingsHistory, 100);
 
 // ---------- PROFILE VIEW ----------
 if(window['pdfjsLib']){
@@ -1249,7 +1371,7 @@ function assembleCvMarkdown(parsed, llmSummary, llmRoleBullets){
 async function callLlm(userMsg, systemMsg, maxTokens){
   if(llmConfig.type === 'ollama'){
     // Use local backend that proxies to Ollama
-    const body = { model: llmConfig.ollama.model, max_tokens: maxTokens, user_message: userMsg };
+    const body = { model: llmConfig.ollama.model, max_tokens: maxTokens, user_message: userMsg, provider: 'ollama' };
     if(systemMsg) body.system = systemMsg;
     const headers = { 'Content-Type': 'application/json' };
     if(llmConfig.ollama.base.trim()) headers['X-Ollama-Base'] = llmConfig.ollama.base.trim();
@@ -1257,6 +1379,32 @@ async function callLlm(userMsg, systemMsg, maxTokens){
       method: 'POST', headers, body: JSON.stringify(body)
     });
     const d = await r.json();
+    if(!r.ok) throw new Error(d.error || `Backend error ${r.status}`);
+    const tb = (d.content || []).find(b => b.type === 'text');
+    if(!tb) throw new Error('No text response from model');
+    let clean = tb.text.trim().replace(/^```json/i,'').replace(/^```/,'').replace(/```$/,'').trim();
+    clean = clean.replace(/"((?:[^"\\]|\\.)*)"/g, (m, inner) => {
+      return '"' + inner.replace(/[\x00-\x1F\x7F]/g, ch => ({"\n":'\\n','\r':'\\r','\t':'\\t'}[ch]||'')) + '"';
+    });
+    return JSON.parse(clean);
+  } else if(llmConfig.type === 'openai'){
+    // Use backend that proxies to OpenAI API
+    if(!llmConfig.openai.key) throw new Error('OpenAI API key not set. Go to Settings to configure it.');
+    const body = {
+      provider: 'openai',
+      model: llmConfig.openai.model || 'gpt-4o',
+      max_tokens: maxTokens,
+      user_message: userMsg,
+      api_key: llmConfig.openai.key
+    };
+    if(systemMsg) body.system = systemMsg;
+    const r = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error || `OpenAI error ${r.status}`);
     const tb = (d.content || []).find(b => b.type === 'text');
     if(!tb) throw new Error('No text response from model');
     let clean = tb.text.trim().replace(/^```json/i,'').replace(/^```/,'').replace(/```$/,'').trim();
@@ -1265,9 +1413,9 @@ async function callLlm(userMsg, systemMsg, maxTokens){
     });
     return JSON.parse(clean);
   } else if(llmConfig.type === 'anthropic'){
-    throw new Error('Anthropic integration not yet implemented. Use Ollama for now.');
+    throw new Error('Anthropic integration not yet implemented. Use Ollama or OpenAI for now.');
   } else if(llmConfig.type === 'custom'){
-    throw new Error('Custom backend integration not yet implemented. Use Ollama for now.');
+    throw new Error('Custom backend integration not yet implemented. Use Ollama or OpenAI for now.');
   }
 }
 
