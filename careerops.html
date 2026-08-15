@@ -1525,9 +1525,66 @@ Respond with ONLY valid JSON:
       skills: (llmResult && llmResult.key_skills_matched) || []
     };
 
-    // ATS score (no refinement loop — structure is locked, only surface missing keywords in UI)
+    // ATS score + auto-refinement loop (up to 2 iterations to hit 80+)
     let atsResult = computeATSScore(jd, currentPackage.tailoredCV);
     currentPackage.atsResult = atsResult;
+
+    const MAX_REFINE_ATTEMPTS = 2;
+    let attempt = 0;
+    while(atsResult.score < 80 && atsResult.missing.length > 0 && attempt < MAX_REFINE_ATTEMPTS){
+      attempt++;
+      statusEl.innerHTML = `<span class="spinner" style="display:inline-block;vertical-align:middle;"></span> ATS score ${atsResult.score}/100 — refining (attempt ${attempt}/${MAX_REFINE_ATTEMPTS})...`;
+
+      const missingKw = atsResult.missing.slice(0, 12).join(', ');
+      const refinePrompt = `You are an ATS optimization expert. The CV below scored ${atsResult.score}/100. Improve it to 80+ by weaving in these missing keywords NATURALLY into the existing bullet points and summary.
+
+MISSING KEYWORDS: ${missingKw}
+
+RULES:
+- Do NOT invent experience or skills the person doesn't have
+- Weave keywords into EXISTING bullet points where the experience is related
+- You may add a brief "Key Skills" or "Technical Skills" line if keywords fit there
+- Keep the same markdown structure (# for name, ## for sections, ### for roles, - for bullets)
+- Do NOT change job titles, companies, or dates
+- Keep the CV roughly the same length
+
+CURRENT CV:
+${currentPackage.tailoredCV}
+
+JOB DESCRIPTION:
+${jd}
+
+Respond with ONLY valid JSON: {"cv":"the full improved CV markdown text here"}`;
+
+      try{
+        const refined = await callLlm(refinePrompt, null, 6000);
+        let refinedText = '';
+        if(typeof refined === 'string'){
+          refinedText = refined;
+        } else if(refined && refined.cv){
+          refinedText = refined.cv;
+        } else if(refined && typeof refined === 'object'){
+          const keys = Object.keys(refined);
+          if(keys.length === 1) refinedText = String(refined[keys[0]]);
+        }
+
+        if(refinedText && refinedText.length > 200){
+          currentPackage.tailoredCV = refinedText;
+          atsResult = computeATSScore(jd, currentPackage.tailoredCV);
+          currentPackage.atsResult = atsResult;
+        } else {
+          break; // LLM didn't return useful content
+        }
+      }catch(refineErr){
+        console.warn(`ATS refinement attempt ${attempt} failed:`, refineErr);
+        break;
+      }
+    }
+
+    if(attempt > 0 && atsResult.score >= 80){
+      statusEl.innerHTML = `<span style="color:var(--green);">✓ ATS refined to ${atsResult.score}/100 after ${attempt} pass${attempt>1?'es':''}</span>`;
+      setTimeout(()=>{ statusEl.textContent = ''; }, 4000);
+    }
 
     document.getElementById('matchMeta').textContent = currentPackage.company || currentPackage.role
       ? `— ${currentPackage.company || 'Unknown Co.'} / ${currentPackage.role || 'role'}` : '';

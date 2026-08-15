@@ -605,6 +605,138 @@ def extract_docx():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/api/generate-docx', methods=['POST'])
+def generate_docx():
+    """Convert markdown CV text to a downloadable DOCX file."""
+    if not DOCX_AVAILABLE:
+        return jsonify({'error': 'python-docx not installed. Run: pip install python-docx'}), 503
+
+    from docx import Document
+    from docx.shared import Pt, Inches, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    import io
+
+    data = request.json
+    cv_text = (data or {}).get('cv_text', '')
+    if not cv_text.strip():
+        return jsonify({'error': 'cv_text is required'}), 400
+
+    try:
+        doc = Document()
+
+        # Set default font
+        style = doc.styles['Normal']
+        style.font.name = 'Calibri'
+        style.font.size = Pt(10.5)
+
+        # Set narrow margins for ATS-friendly single-page layout
+        for section in doc.sections:
+            section.top_margin = Inches(0.5)
+            section.bottom_margin = Inches(0.5)
+            section.left_margin = Inches(0.6)
+            section.right_margin = Inches(0.6)
+
+        lines = cv_text.split('\n')
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+
+            # Skip empty lines
+            if not stripped:
+                i += 1
+                continue
+
+            # H1: Name / title (# ...)
+            if stripped.startswith('# '):
+                text = stripped[2:].strip()
+                p = doc.add_paragraph()
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                run = p.add_run(text)
+                run.bold = True
+                run.font.size = Pt(16)
+                p.space_after = Pt(2)
+                i += 1
+                continue
+
+            # H2: Section headers (## ...)
+            if stripped.startswith('## '):
+                text = stripped[3:].strip()
+                p = doc.add_paragraph()
+                run = p.add_run(text.upper())
+                run.bold = True
+                run.font.size = Pt(11)
+                run.font.color.rgb = RGBColor(0x1a, 0x1a, 0x1a)
+                p.space_before = Pt(10)
+                p.space_after = Pt(3)
+                # Add a bottom border effect via a thin line
+                i += 1
+                continue
+
+            # H3: Sub-headers / role titles (### ...)
+            if stripped.startswith('### '):
+                text = stripped[4:].strip()
+                p = doc.add_paragraph()
+                run = p.add_run(text)
+                run.bold = True
+                run.font.size = Pt(10.5)
+                p.space_before = Pt(6)
+                p.space_after = Pt(1)
+                i += 1
+                continue
+
+            # Bullet points (- ... or * ...)
+            if stripped.startswith('- ') or stripped.startswith('* '):
+                text = stripped[2:].strip()
+                p = doc.add_paragraph(style='List Bullet')
+                # Handle bold markers **...**
+                parts = re.split(r'\*\*(.*?)\*\*', text)
+                for j, part in enumerate(parts):
+                    if j % 2 == 1:
+                        run = p.add_run(part)
+                        run.bold = True
+                    else:
+                        p.add_run(part)
+                p.paragraph_format.space_after = Pt(1)
+                p.paragraph_format.space_before = Pt(0)
+                i += 1
+                continue
+
+            # Regular paragraph (handle inline **bold** and contact info lines)
+            p = doc.add_paragraph()
+            # Check if it's a contact/info line (contains | separators)
+            if '|' in stripped and len(stripped.split('|')) >= 3:
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                run = p.add_run(stripped)
+                run.font.size = Pt(9.5)
+                run.font.color.rgb = RGBColor(0x44, 0x44, 0x44)
+            else:
+                parts = re.split(r'\*\*(.*?)\*\*', stripped)
+                for j, part in enumerate(parts):
+                    if j % 2 == 1:
+                        run = p.add_run(part)
+                        run.bold = True
+                    else:
+                        p.add_run(part)
+            p.space_after = Pt(2)
+            i += 1
+
+        # Write to buffer
+        buffer = io.BytesIO()
+        doc.save(buffer)
+        buffer.seek(0)
+
+        return send_file(
+            buffer,
+            mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            as_attachment=True,
+            download_name='CV.docx'
+        )
+
+    except Exception as e:
+        return jsonify({'error': f'DOCX generation failed: {str(e)}'}), 500
+
 # ========== LLM PROVIDER CONFIGURATION (Secure) ==========
 
 @app.route('/api/llm-providers', methods=['GET'])
