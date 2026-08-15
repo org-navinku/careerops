@@ -1606,37 +1606,42 @@ Respond with ONLY valid JSON:
       skills: (llmResult && llmResult.key_skills_matched) || []
     };
 
-    // ATS score + auto-refinement loop (up to 2 iterations to hit 80+)
+    // ATS score + auto-refinement loop (up to 4 iterations to hit 80+)
     let atsResult = computeATSScore(jd, currentPackage.tailoredCV);
     currentPackage.atsResult = atsResult;
 
-    const MAX_REFINE_ATTEMPTS = 2;
+    const MAX_REFINE_ATTEMPTS = 4;
     let attempt = 0;
     while(atsResult.score < 80 && atsResult.missing.length > 0 && attempt < MAX_REFINE_ATTEMPTS){
       attempt++;
       statusEl.innerHTML = `<span class="spinner" style="display:inline-block;vertical-align:middle;"></span> ATS score ${atsResult.score}/100 — refining (attempt ${attempt}/${MAX_REFINE_ATTEMPTS})...`;
 
-      const missingKw = atsResult.missing.slice(0, 12).join(', ');
-      const refinePrompt = `You are an ATS optimization expert. The CV below scored ${atsResult.score}/100. Improve it to 80+ by weaving in these missing keywords NATURALLY into the existing bullet points and summary.
+      const missingKw = atsResult.missing.slice(0, 15).join(', ');
+      const refinePrompt = `You are an expert ATS optimization specialist. The CV below scored only ${atsResult.score}/100 and MUST reach at least 80/100 to pass ATS filters.
 
-MISSING KEYWORDS: ${missingKw}
+CRITICAL MISSING KEYWORDS TO ADD: ${missingKw}
+
+OPTIMIZATION STRATEGY:
+1. Identify which missing keywords relate to the candidate's existing experience
+2. Reword bullet points to naturally include 3-5 high-impact missing keywords per relevant section
+3. Add or expand a "## KEY SKILLS" or "## TECHNICAL SKILLS" section with relevant missing keywords
+4. Use variations of missing terms where applicable (e.g., if missing "Python", mention it if the candidate uses it)
+5. Ensure every bullet point is result-oriented with metrics/impact when possible
 
 RULES:
-- Do NOT invent experience or skills the person doesn't have
-- Weave keywords into EXISTING bullet points where the experience is related
-- Add a "## KEY SKILLS" section near the top listing relevant technical tools/keywords that are truthful
-- Keep the same markdown structure (# for name, ## for sections, ### for roles, - for bullets)
-- Do NOT change job titles, companies, or dates
-- Keep the CV roughly the same length
-- Return ONLY the improved CV in markdown — no explanations, no wrapping
+- Do NOT invent false experience or skills
+- Do NOT change job titles, companies, dates, or overall structure
+- Keep markdown format: # for name, ## for sections, - for bullets
+- Aim for 400-600 words total
+- Return ONLY the improved CV markdown — no explanations
 
 CURRENT CV:
 ${currentPackage.tailoredCV}
 
-JOB DESCRIPTION:
+JOB DESCRIPTION FOR CONTEXT:
 ${jd}
 
-Output the full improved CV markdown now:`;
+Generate the optimized CV now. Focus on reaching 80+ ATS score:`;
 
       try{
         const refined = await callLlmRaw(refinePrompt, null, 6000);
@@ -1668,6 +1673,9 @@ Output the full improved CV markdown now:`;
     if(attempt > 0 && atsResult.score >= 80){
       statusEl.innerHTML = `<span style="color:var(--green);">✓ ATS refined to ${atsResult.score}/100 after ${attempt} pass${attempt>1?'es':''}</span>`;
       setTimeout(()=>{ statusEl.textContent = ''; }, 4000);
+    } else if(atsResult.score < 80 && attempt === MAX_REFINE_ATTEMPTS){
+      statusEl.innerHTML = `<span style="color:var(--amber);">⚠️ ATS score ${atsResult.score}/100 (below 80 target after ${attempt} refinement passes — edit CV to add more keywords)</span>`;
+      setTimeout(()=>{ statusEl.textContent = ''; }, 6000);
     }
 
     document.getElementById('matchMeta').textContent = currentPackage.company || currentPackage.role
@@ -1792,18 +1800,30 @@ function extractKeywords(text, topN){
 function computeATSScore(jdText, cvText){
   const cvLower = (cvText || '').toLowerCase();
   const targetKeywords = extractKeywords(jdText, 25);
-  const matched = targetKeywords.filter(k => cvLower.includes(k));
-  const missing = targetKeywords.filter(k => !cvLower.includes(k));
+
+  // Smart keyword matching: exact match or substring match (for variations)
+  const matched = targetKeywords.filter(k => {
+    const kwLower = k.toLowerCase();
+    if(cvLower.includes(kwLower)) return true;
+    // Allow partial matches for common variations (e.g., "develop" matches "developer", "developing")
+    if(kwLower.length >= 4){
+      const prefix = kwLower.slice(0, -2);
+      if(cvLower.includes(prefix)) return true;
+    }
+    return false;
+  });
+
+  const missing = targetKeywords.filter(k => !matched.includes(k));
   const kwRatio = targetKeywords.length ? matched.length / targetKeywords.length : 1;
   // Keywords are 70% of the score (most important for ATS)
   const kwPoints = kwRatio * 70;
 
   const sectionHits = ['experience','education','skills','summary','projects','certifications']
     .filter(s => new RegExp('(^|\\n)\\s*#{0,3}\\s*'+s, 'i').test(cvText||''));
-  const sectionPoints = Math.min(sectionHits.length, 3) / 3 * 12;
+  const sectionPoints = Math.min(sectionHits.length, 4) / 4 * 15;
 
   const quantMatches = (cvText||'').match(/\b\d+[%+]?\b/g) || [];
-  const quantPoints = Math.min(quantMatches.length, 5) / 5 * 8;
+  const quantPoints = Math.min(quantMatches.length, 8) / 8 * 10;
 
   const hasEmail = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i.test(cvText||'');
   const hasPhone = /\+?\d[\d\s\-\(\)]{7,}\d/.test(cvText||'');
