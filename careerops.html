@@ -493,7 +493,7 @@ const { jsPDF } = window.jspdf;
 let currentUser = null;
 
 async function checkAuth(){
-  const stored = localStorage.getItem('careerops-user');
+  const stored = localStorage.getItem('careerops-user') || sessionStorage.getItem('careerops-user');
   if(stored){
     try{
       currentUser = JSON.parse(stored);
