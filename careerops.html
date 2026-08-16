@@ -1555,7 +1555,9 @@ async function generatePackage(){
     const llmPrompt = `You are a CV writer. Tailor ONLY the summary and experience bullets to match the job description.
 Do NOT invent skills or tools not present in the original bullets.
 Do NOT change job titles, companies, or dates.
+Do NOT add or remove roles — keep the EXACT same number of roles.
 Keep each bullet to 1-2 lines.
+Reword bullets to include relevant keywords from the JD where the experience genuinely applies.
 
 ORIGINAL SUMMARY:
 ${parsed.summary}
@@ -1617,31 +1619,28 @@ Respond with ONLY valid JSON:
       statusEl.innerHTML = `<span class="spinner" style="display:inline-block;vertical-align:middle;"></span> ATS score ${atsResult.score}/100 — refining (attempt ${attempt}/${MAX_REFINE_ATTEMPTS})...`;
 
       const missingKw = atsResult.missing.slice(0, 15).join(', ');
-      const refinePrompt = `You are an expert ATS optimization specialist. The CV below scored only ${atsResult.score}/100 and MUST reach at least 80/100 to pass ATS filters.
+      const refinePrompt = `You are an ATS keyword optimizer. The CV below scored ${atsResult.score}/100. It MUST reach 80+.
 
-CRITICAL MISSING KEYWORDS TO ADD: ${missingKw}
+MISSING KEYWORDS: ${missingKw}
 
-OPTIMIZATION STRATEGY:
-1. Identify which missing keywords relate to the candidate's existing experience
-2. Reword bullet points to naturally include 3-5 high-impact missing keywords per relevant section
-3. Add or expand a "## KEY SKILLS" or "## TECHNICAL SKILLS" section with relevant missing keywords
-4. Use variations of missing terms where applicable (e.g., if missing "Python", mention it if the candidate uses it)
-5. Ensure every bullet point is result-oriented with metrics/impact when possible
+YOUR TASK — surgically insert missing keywords while keeping the CV IDENTICAL in structure:
+1. Keep the EXACT same layout: same sections, same order, same number of bullet points, same headings
+2. Reword existing bullets to naturally include missing keywords where the candidate's experience is relevant
+3. If a "## KEY SKILLS" section exists, add missing keywords there. If not, add one after SUMMARY with a single line listing relevant skills
+4. Do NOT add new roles, new bullet points, or new sections (except KEY SKILLS if missing)
+5. Do NOT remove any content
+6. Do NOT change job titles, company names, dates, education, or certifications
+7. Do NOT invent experience the candidate doesn't have
 
-RULES:
-- Do NOT invent false experience or skills
-- Do NOT change job titles, companies, dates, or overall structure
-- Keep markdown format: # for name, ## for sections, - for bullets
-- Aim for 400-600 words total
-- Return ONLY the improved CV markdown — no explanations
+FORMAT: Return the FULL CV in markdown. Same # ## ### and - structure. Nothing else — no explanations.
 
 CURRENT CV:
 ${currentPackage.tailoredCV}
 
-JOB DESCRIPTION FOR CONTEXT:
+JOB DESCRIPTION:
 ${jd}
 
-Generate the optimized CV now. Focus on reaching 80+ ATS score:`;
+Output the improved CV now:`;
 
       try{
         const refined = await callLlmRaw(refinePrompt, null, 6000);
