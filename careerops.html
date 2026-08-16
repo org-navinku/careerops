@@ -1990,12 +1990,13 @@ function createCvComparison(originalCv, tailoredCv, originalAts, tailoredAts, jd
   }
 
   // Compare each role's bullets
-  originalSections.roles.forEach((origRole, idx) => {
-    const tailRole = tailoredSections.roles[idx];
+  originalSections.roles.forEach((origRole, roleIdx) => {
+    const tailRole = tailoredSections.roles[roleIdx];
     if(!tailRole) return;
 
     const roleComparison = {
       type: 'role',
+      role_idx: roleIdx,
       role_header: origRole.header,
       bullets: []
     };
@@ -2083,36 +2084,44 @@ function extractNewKeywords(original, tailored){
 function renderCvComparison(comparison){
   const panel = document.getElementById('cvComparisonPanel');
   const content = document.getElementById('comparisonContent');
+  if(!content) return;
 
-  // Render summary
-  const summaryHtml = `
-    <div class="comparison-section">
-      <div class="comparison-header">✓ SUMMARY (Auto-Accepted)</div>
-      <div class="comparison-change">
-        <div class="comparison-original"><strong>Original:</strong> ${comparison.changes[0]?.original.substring(0, 100)}...</div>
-        <div class="comparison-tailored"><strong>Tailored:</strong> ${comparison.changes[0]?.tailored.substring(0, 100)}...</div>
-        ${comparison.changes[0]?.keywords_added ? `<div class="keywords-added">📌 Keywords added: ${comparison.changes[0].keywords_added.join(', ')}</div>` : ''}
-        ${comparison.changes[0]?.jd_matches.length > 0 ? `<div class="jd-match">✓ Matches JD: ${comparison.changes[0].jd_matches.join(', ')}</div>` : ''}
+  const summaryChange = comparison.changes.find(c => c.type === 'summary');
+  let summaryHtml = '';
+  if(summaryChange){
+    summaryHtml = `
+      <div class="comparison-section">
+        <div class="comparison-header">✓ SUMMARY (Auto-Accepted)</div>
+        <div class="comparison-change">
+          <label style="display:flex;align-items:flex-start;cursor:pointer;">
+            <input type="checkbox" class="comparison-checkbox summary-check" checked disabled style="cursor:not-allowed;">
+            <div style="flex:1;margin-left:8px;">
+              <div class="comparison-original"><strong>Original:</strong> ${(summaryChange.original || '').substring(0, 100)}...</div>
+              <div class="comparison-tailored"><strong>Tailored:</strong> ${(summaryChange.tailored || '').substring(0, 100)}...</div>
+              ${summaryChange.keywords_added.length > 0 ? `<div class="keywords-added">📌 Keywords added: ${summaryChange.keywords_added.join(', ')}</div>` : ''}
+              ${summaryChange.jd_matches.length > 0 ? `<div class="jd-match">✓ Matches JD: ${summaryChange.jd_matches.join(', ')}</div>` : ''}
+            </div>
+          </label>
+        </div>
       </div>
-    </div>
-  `;
+    `;
+  }
 
   // Render role changes
   let rolesHtml = '';
   comparison.changes.forEach(change => {
     if(change.type === 'role'){
-      rolesHtml += `<div class="comparison-section">
-        <div class="comparison-header">Role: ${change.role_header}</div>`;
+      rolesHtml += `<div class="comparison-section"><div class="comparison-header">📋 ${change.role_header}</div>`;
 
-      change.bullets.forEach(bullet => {
+      change.bullets.forEach((bullet, bulletIdx) => {
         const atsClass = bullet.ats_improvement >= 10 ? 'improved' : bullet.ats_improvement >= 5 ? 'minor' : 'unchanged';
         rolesHtml += `
           <div class="comparison-change">
-            <label style="display:flex;align-items:flex-start;">
-              <input type="checkbox" class="comparison-checkbox bullet-check" data-role-idx="${change.role_idx}" data-bullet-idx="${bullet.index}" ${bullet.approved ? 'checked' : ''}>
-              <div style="flex:1;">
-                <div class="comparison-original"><strong>Original:</strong> ${bullet.original.substring(0, 80)}...</div>
-                <div class="comparison-tailored"><strong>Tailored:</strong> ${bullet.tailored.substring(0, 80)}...</div>
+            <label style="display:flex;align-items:flex-start;cursor:pointer;">
+              <input type="checkbox" class="comparison-checkbox bullet-check" data-role-idx="${change.role_idx}" data-bullet-idx="${bullet.index}" ${bullet.approved ? 'checked' : ''} style="margin-top:4px;cursor:pointer;">
+              <div style="flex:1;margin-left:8px;">
+                <div class="comparison-original"><strong>Original:</strong> ${(bullet.original || '').substring(0, 80)}...</div>
+                <div class="comparison-tailored"><strong>Tailored:</strong> ${(bullet.tailored || '').substring(0, 80)}...</div>
                 <div class="ats-badge ${atsClass}">ATS ${bullet.ats_original}→${bullet.ats_tailored} (+${bullet.ats_improvement})</div>
                 ${bullet.keywords_added.length > 0 ? `<div class="keywords-added">📌 ${bullet.keywords_added.join(', ')}</div>` : ''}
                 ${bullet.jd_matches.length > 0 ? `<div class="jd-match">✓ ${bullet.jd_matches.join(', ')}</div>` : ''}
@@ -2144,17 +2153,24 @@ function renderCvComparison(comparison){
 
   panel.style.display = 'block';
 
-  // Attach checkbox listeners
-  document.querySelectorAll('.bullet-check').forEach(checkbox => {
-    checkbox.addEventListener('change', updateComparisonStats);
-  });
+  // Attach checkbox listeners - use delegation for dynamic checkboxes
+  setTimeout(() => {
+    document.querySelectorAll('.bullet-check').forEach(checkbox => {
+      checkbox.removeEventListener('change', updateComparisonStats);
+      checkbox.addEventListener('change', updateComparisonStats);
+    });
+    updateComparisonStats();
+  }, 100);
 }
 
 function updateComparisonStats(){
-  const approved = document.querySelectorAll('.comparison-checkbox:checked').length;
-  const total = document.querySelectorAll('.comparison-checkbox').length;
+  const bulletCheckboxes = document.querySelectorAll('.bullet-check');
+  const approved = Array.from(bulletCheckboxes).filter(cb => cb.checked).length;
+  const total = bulletCheckboxes.length;
   const stats = document.getElementById('comparisonSummaryStats');
-  stats.textContent = `${approved} of ${total} changes approved | Ready to generate: ${approved > 0 ? '✓' : '❌'}`;
+  if(stats){
+    stats.textContent = `${approved} of ${total} changes approved | Ready to generate: ${approved > 0 ? '✓' : '❌'}`;
+  }
 }
 
 function mergeCvChanges(originalCv, tailoredCv, comparison){
