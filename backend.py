@@ -908,17 +908,28 @@ def activate_llm_provider(config_id):
 def get_active_provider_key(user_id):
     """Fetch the decrypted API key for the active provider. Returns (key, provider_config) or (None, None)."""
     if not DYNAMODB_AVAILABLE or not fernet:
+        print(f"[get_active_provider_key] DYNAMODB_AVAILABLE={DYNAMODB_AVAILABLE}, fernet={'set' if fernet else 'None'}")
         return None, None
     try:
         response = llm_providers_table.query(
             KeyConditionExpression=Key('userId').eq(user_id)
         )
-        for item in response.get('Items', []):
+        items = response.get('Items', [])
+        print(f"[get_active_provider_key] Found {len(items)} providers for userId={user_id}")
+        for item in items:
+            print(f"  - id={item.get('id')} provider={item.get('provider')} isActive={item.get('isActive')} hasKey={'yes' if item.get('apiKeyEncrypted') else 'no'}")
             if item.get('isActive') and item.get('apiKeyEncrypted'):
-                key = decrypt_value(item['apiKeyEncrypted'])
-                return key, json_safe(item)
+                try:
+                    key = decrypt_value(item['apiKeyEncrypted'])
+                    print(f"  → Decrypted key successfully (length={len(key)})")
+                    return key, json_safe(item)
+                except Exception as dec_err:
+                    print(f"  → DECRYPTION FAILED: {dec_err} — key was likely saved with a different CAREEROPS_ENCRYPTION_KEY")
+                    return None, None
+        print(f"[get_active_provider_key] No active provider with encrypted key found")
         return None, None
-    except Exception:
+    except Exception as e:
+        print(f"[get_active_provider_key] Exception: {e}")
         return None, None
 
 
@@ -955,6 +966,8 @@ def generate():
             api_key = None
             provider_config = None
 
+            print(f"[generate] provider={provider}, userId={user_id}, providerId={provider_id}")
+
             # Try to fetch key from DynamoDB by provider ID
             if provider_id and user_id:
                 api_key, provider_config = get_provider_key_by_id(user_id, provider_id)
@@ -964,6 +977,10 @@ def generate():
             # Fallback to environment variable
             if not api_key and provider == 'openai':
                 api_key = OPENAI_API_KEY
+                if api_key:
+                    print(f"[generate] Using OPENAI_API_KEY env var fallback")
+
+            print(f"[generate] api_key resolved: {'yes' if api_key else 'NO'}")
 
             if provider == 'openai':
                 return generate_openai(data, system, user_msg, model, api_key)
@@ -1040,7 +1057,7 @@ def generate_openai(data, system, user_msg, model, api_key=None):
     if not api_key:
         api_key = OPENAI_API_KEY
     if not api_key:
-        return jsonify({'error': 'OpenAI API key not configured. Add one in Settings.'}), 400
+        return jsonify({'error': 'OpenAI API key not configured. Delete and re-add the provider in Settings (encryption key may have changed).'}), 400
 
     max_tokens = data.get('max_tokens', 12000)
     messages = []
