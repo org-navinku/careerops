@@ -102,6 +102,303 @@ except Exception as e:
     print(f"⚠️  S3 initialization failed: {e}")
     S3_AVAILABLE = False
 
+# ========== CV COMPARISON ENGINE ==========
+
+
+class ParseError(Exception):
+    """Raised when CV markdown cannot be parsed into the CV_Category_Set."""
+    pass
+
+
+class CVParser:
+    """Parses CV markdown into the fixed CV_Category_Set structure."""
+
+    CATEGORY_HEADERS = {
+        'PROFESSIONAL SUMMARY': 'summary',
+        'CORE SKILLS': 'core_skills',
+        'PROFESSIONAL EXPERIENCE': 'professional_experience',
+        'CERTIFICATIONS': 'certifications',
+        'EDUCATION': 'education',
+        'COMMUNITY LEADERSHIP & ENGAGEMENT': 'community',
+        'LANGUAGES': 'languages',
+    }
+
+    # The fixed ordering of top-level categories
+    CATEGORY_ORDER = [
+        'heading', 'subheading', 'contact', 'summary', 'core_skills',
+        'professional_experience', 'certifications', 'education',
+        'community', 'languages',
+    ]
+
+    def parse(self, markdown: str) -> dict:
+        """Parse CV markdown into category structure.
+
+        Args:
+            markdown: Raw CV markdown string.
+
+        Returns:
+            Dict with keys for each category containing content strings.
+            Professional Experience includes a 'roles' list of sub-categories.
+
+        Raises:
+            ParseError: If input is empty or has no recognizable headers.
+        """
+        if not markdown or not markdown.strip():
+            raise ParseError("Input CV markdown is empty.")
+
+        lines = markdown.split('\n')
+        categories = {}
+        current_category = None
+        found_h1 = False
+        found_h2 = False
+        found_subheading = False
+        found_contact = False
+        current_lines = []
+
+        def _flush_lines(cat_key, line_list):
+            """Save accumulated lines to the category."""
+            if cat_key and line_list:
+                # Strip trailing empty lines
+                while line_list and line_list[-1].strip() == '':
+                    line_list.pop()
+                if not line_list:
+                    return
+                content = '\n'.join(line_list)
+                if cat_key == '_after_pe':
+                    # Unmapped content after Professional Experience —
+                    # append to last PE role's content (nearest preceding category)
+                    pe = categories.get('professional_experience')
+                    if pe and pe.get('roles'):
+                        last_role = pe['roles'][-1]
+                        if last_role['content']:
+                            last_role['content'] = last_role['content'] + '\n' + content
+                        else:
+                            last_role['content'] = content
+                    # If no PE roles exist, silently discard (shouldn't happen)
+                elif cat_key in categories:
+                    categories[cat_key] = categories[cat_key] + '\n' + content
+                else:
+                    categories[cat_key] = content
+
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+
+            # Detect H1 header (heading)
+            if stripped.startswith('# ') and not stripped.startswith('## '):
+                if not found_h1:
+                    _flush_lines(current_category, current_lines)
+                    current_lines = []
+                    found_h1 = True
+                    categories['heading'] = stripped
+                    current_category = 'heading'
+                    i += 1
+                    continue
+                else:
+                    # Additional H1 — treat as content of current category
+                    current_lines.append(line)
+                    i += 1
+                    continue
+
+            # Detect subheading: first bold line (**...**) after H1, before any H2
+            if (found_h1 and not found_subheading and not found_h2
+                    and stripped.startswith('**') and stripped.endswith('**')):
+                _flush_lines(current_category, current_lines)
+                current_lines = []
+                found_subheading = True
+                categories['subheading'] = stripped
+                current_category = 'subheading'
+                i += 1
+                continue
+
+            # Detect contact line: contains email-like pattern and pipe separators, after subheading/heading, before H2
+            if (found_h1 and not found_contact and not found_h2
+                    and not stripped.startswith('#')
+                    and '|' in stripped and '@' in stripped):
+                _flush_lines(current_category, current_lines)
+                current_lines = []
+                found_contact = True
+                categories['contact'] = stripped
+                current_category = 'contact'
+                i += 1
+                continue
+
+            # Detect H2 headers (## SECTION NAME)
+            if stripped.startswith('## '):
+                found_h2 = True
+                header_text = stripped[3:].strip()
+                # Look up in CATEGORY_HEADERS
+                cat_key = self.CATEGORY_HEADERS.get(header_text.upper())
+                if cat_key:
+                    _flush_lines(current_category, current_lines)
+                    current_lines = []
+                    if cat_key == 'professional_experience':
+                        # Parse the professional experience section specially
+                        pe_result, new_i = self._parse_professional_experience(lines, i)
+                        categories['professional_experience'] = pe_result
+                        # Set current_category to a marker so unmapped content
+                        # after PE gets appended to the last role
+                        current_category = '_after_pe'
+                        current_lines = []
+                        i = new_i
+                        continue
+                    else:
+                        current_category = cat_key
+                        current_lines = [stripped]
+                        i += 1
+                        continue
+                else:
+                    # Unrecognized H2 header — append to current category
+                    current_lines.append(line)
+                    i += 1
+                    continue
+
+            # Regular line — append to current category accumulator
+            current_lines.append(line)
+            i += 1
+
+        # Flush remaining lines
+        _flush_lines(current_category, current_lines)
+
+        # Validate that we found at least some recognizable structure
+        if not found_h1 and not found_h2:
+            raise ParseError(
+                "No recognizable header structure found. "
+                "Expected at least an H1 heading (# ) or H2 section headers (## )."
+            )
+
+        return categories
+
+    def _parse_professional_experience(self, lines, start_idx):
+        """Parse the Professional Experience section into roles.
+
+        Args:
+            lines: All lines of the CV markdown.
+            start_idx: Index of the ## PROFESSIONAL EXPERIENCE line.
+
+        Returns:
+            Tuple of (pe_dict, next_index) where pe_dict has 'header' and 'roles'.
+        """
+        header_line = lines[start_idx].strip()
+        result = {
+            'header': header_line,
+            'roles': [],
+        }
+
+        i = start_idx + 1
+        current_role = None
+        role_content_lines = []
+        role_idx = 0
+
+        def _flush_role():
+            nonlocal current_role, role_content_lines, role_idx
+            if current_role:
+                current_role['content'] = '\n'.join(role_content_lines).strip()
+                result['roles'].append(current_role)
+                role_content_lines = []
+
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+
+            # Check if we've hit another H2 section (end of professional experience)
+            if stripped.startswith('## '):
+                _flush_role()
+                return result, i
+
+            # Check for H3 header (role title)
+            if stripped.startswith('### '):
+                _flush_role()
+                current_role = {
+                    'key': f'role_{role_idx}',
+                    'title': stripped,
+                    'metadata': '',
+                    'content': '',
+                }
+                role_content_lines = []
+                role_idx += 1
+
+                # Look for metadata line (bold line immediately after H3)
+                # Skip empty lines between H3 and metadata
+                j = i + 1
+                while j < len(lines) and lines[j].strip() == '':
+                    j += 1
+                if j < len(lines):
+                    meta_stripped = lines[j].strip()
+                    if meta_stripped.startswith('**') and meta_stripped.endswith('**'):
+                        current_role['metadata'] = meta_stripped
+                        i = j + 1
+                        continue
+
+                i += 1
+                continue
+
+            # Regular content within a role or pre-role content
+            if current_role is not None:
+                role_content_lines.append(line)
+            else:
+                # Content between the ## header and first ### role
+                # Append to nearest preceding category (the PE header context)
+                # We'll just skip empty lines here
+                pass
+
+            i += 1
+
+        # Flush the last role at end of file
+        _flush_role()
+        return result, i
+
+    def serialize(self, categories: dict) -> str:
+        """Serialize parsed categories back to markdown.
+
+        Args:
+            categories: Parsed category dictionary.
+
+        Returns:
+            Markdown string equivalent to the original input.
+        """
+        parts = []
+
+        for cat_key in self.CATEGORY_ORDER:
+            if cat_key not in categories:
+                continue
+
+            value = categories[cat_key]
+
+            if cat_key == 'professional_experience':
+                # Serialize PE with its header and roles
+                if isinstance(value, dict):
+                    parts.append(value.get('header', '## PROFESSIONAL EXPERIENCE'))
+                    parts.append('')  # blank line after header
+                    for role in value.get('roles', []):
+                        parts.append(role.get('title', ''))
+                        if role.get('metadata'):
+                            parts.append(role['metadata'])
+                        parts.append('')  # blank line before content
+                        if role.get('content'):
+                            parts.append(role['content'])
+                        parts.append('')  # blank line after role
+                else:
+                    # Fallback: PE stored as plain string
+                    parts.append(value)
+                    parts.append('')
+            elif cat_key in ('heading', 'subheading', 'contact'):
+                # These are single-line categories
+                parts.append(value)
+                parts.append('')
+            else:
+                # Section categories (summary, core_skills, etc.)
+                parts.append(value)
+                parts.append('')
+
+        # Join and clean up excessive blank lines
+        result = '\n'.join(parts)
+        # Normalize multiple blank lines to at most two newlines
+        result = re.sub(r'\n{3,}', '\n\n', result)
+        return result.strip() + '\n'
+
+
 def dynamodb_safe(value):
     """Convert JSON payloads into DynamoDB-compatible values."""
     return json.loads(json.dumps(value), parse_float=Decimal)
@@ -144,6 +441,259 @@ def validate_cv_file(file):
         return f'File too large. Maximum size is 5 MB'
 
     return None
+
+
+class ComparisonError(Exception):
+    """Raised when comparison inputs are invalid or incomplete."""
+    pass
+
+
+class ComparisonEngine:
+    """Compares original and ATS-suggested CV categories."""
+
+    # Required top-level categories (excluding professional_experience which is handled specially)
+    _SIMPLE_CATEGORIES = [
+        'heading', 'subheading', 'contact', 'summary', 'core_skills',
+        'certifications', 'education', 'community', 'languages',
+    ]
+
+    def compare(self, original: dict, suggested: dict) -> dict:
+        """Produce comparison object with change status per category.
+
+        Args:
+            original: Parsed categories from original CV (output of CVParser.parse()).
+            suggested: Parsed categories from ATS-suggested CV (output of CVParser.parse()).
+
+        Returns:
+            Dict with comparison entries per category in CV_Category_Set order.
+            Each entry contains:
+            - original_content: str
+            - suggested_content: str
+            - changed: bool
+            - score_impact: int (defaults to 0)
+
+            Professional Experience roles use keys like
+            "professional_experience.role_0", "professional_experience.role_1", etc.
+
+        Raises:
+            ComparisonError: If either input is invalid/incomplete.
+        """
+        self._validate_input(original, "original")
+        self._validate_input(suggested, "suggested")
+
+        result = {}
+
+        for cat_key in CVParser.CATEGORY_ORDER:
+            if cat_key == 'professional_experience':
+                # Handle professional experience role-by-role
+                self._compare_professional_experience(original, suggested, result)
+            else:
+                orig_content = original.get(cat_key, '')
+                sugg_content = suggested.get(cat_key, '')
+                changed = orig_content.strip() != sugg_content.strip()
+                result[cat_key] = {
+                    'original_content': orig_content,
+                    'suggested_content': sugg_content if changed else orig_content,
+                    'changed': changed,
+                    'score_impact': 0,
+                }
+
+        return result
+
+    def _validate_input(self, data: dict, label: str) -> None:
+        """Validate that a parsed CV dict is valid and complete.
+
+        Raises ComparisonError if the input is not a dict or is missing
+        required category keys.
+        """
+        if not isinstance(data, dict):
+            raise ComparisonError(
+                f"The {label} input is not a valid parsed CV dictionary."
+            )
+
+        # Must have at least heading and one H2 section to be considered valid
+        if 'heading' not in data:
+            raise ComparisonError(
+                f"The {label} input is missing required 'heading' category."
+            )
+
+        # Check that professional_experience, if present, has the expected structure
+        pe = data.get('professional_experience')
+        if pe is not None and not isinstance(pe, dict):
+            raise ComparisonError(
+                f"The {label} input has invalid 'professional_experience' structure. "
+                "Expected a dict with 'header' and 'roles' keys."
+            )
+        if isinstance(pe, dict) and 'roles' not in pe:
+            raise ComparisonError(
+                f"The {label} input 'professional_experience' is missing 'roles' key."
+            )
+
+    def _compare_professional_experience(self, original: dict, suggested: dict, result: dict) -> None:
+        """Compare Professional Experience header and roles individually.
+
+        Adds a 'professional_experience' entry for the header, and entries like
+        "professional_experience.role_0", "professional_experience.role_1" for roles.
+        """
+        orig_pe = original.get('professional_experience', {})
+        sugg_pe = suggested.get('professional_experience', {})
+
+        # Compare the PE header itself
+        orig_header = orig_pe.get('header', '') if isinstance(orig_pe, dict) else ''
+        sugg_header = sugg_pe.get('header', '') if isinstance(sugg_pe, dict) else ''
+        header_changed = orig_header.strip() != sugg_header.strip()
+        result['professional_experience'] = {
+            'original_content': orig_header,
+            'suggested_content': sugg_header if header_changed else orig_header,
+            'changed': header_changed,
+            'score_impact': 0,
+        }
+
+        orig_roles = orig_pe.get('roles', []) if isinstance(orig_pe, dict) else []
+        sugg_roles = sugg_pe.get('roles', []) if isinstance(sugg_pe, dict) else []
+
+        # Compare role by role based on position
+        max_roles = max(len(orig_roles), len(sugg_roles))
+
+        for i in range(max_roles):
+            key = f'professional_experience.role_{i}'
+
+            orig_role = orig_roles[i] if i < len(orig_roles) else None
+            sugg_role = sugg_roles[i] if i < len(sugg_roles) else None
+
+            orig_content = self._serialize_role(orig_role) if orig_role else ''
+            sugg_content = self._serialize_role(sugg_role) if sugg_role else ''
+
+            changed = orig_content.strip() != sugg_content.strip()
+            result[key] = {
+                'original_content': orig_content,
+                'suggested_content': sugg_content if changed else orig_content,
+                'changed': changed,
+                'score_impact': 0,
+            }
+
+    def _serialize_role(self, role: dict) -> str:
+        """Serialize a single role dict to its markdown content string."""
+        parts = []
+        if role.get('title'):
+            parts.append(role['title'])
+        if role.get('metadata'):
+            parts.append(role['metadata'])
+        if role.get('content'):
+            parts.append(role['content'])
+        return '\n'.join(parts)
+
+
+# ========== CV ATS COMPARISON UTILITIES ==========
+
+
+def compute_ats_score(baseline: int, impacts: dict, approvals: dict) -> dict:
+    """Compute current and max ATS scores from baseline, per-category impacts, and approval states.
+
+    Args:
+        baseline: Base ATS score (0-100).
+        impacts: Dict mapping category keys to signed integer score impacts.
+        approvals: Dict mapping category keys to boolean (True = approved).
+
+    Returns:
+        Dict with 'current_score' and 'max_score', both clamped to [0, 100].
+    """
+    approved_sum = sum(
+        impacts[key] for key in impacts if approvals.get(key, False)
+    )
+    total_sum = sum(impacts.values())
+
+    current_score = max(0, min(100, baseline + approved_sum))
+    max_score = max(0, min(100, baseline + total_sum))
+
+    return {"current_score": current_score, "max_score": max_score}
+
+
+def truncate_text(text: str, max_len: int) -> str:
+    """Truncate text for display purposes.
+
+    If len(text) <= max_len, returns the original text unchanged.
+    Otherwise, returns the first max_len characters followed by "…" (ellipsis).
+
+    Args:
+        text: The input string.
+        max_len: Maximum number of characters before truncation.
+
+    Returns:
+        Original text if short enough, or truncated text with "…" appended.
+    """
+    if len(text) <= max_len:
+        return text
+    return text[:max_len] + "…"
+
+
+# ========== CV COMPARISON & ASSEMBLY ==========
+
+
+class AssemblyError(Exception):
+    """Raised when CV assembly fails due to invalid inputs."""
+    pass
+
+
+class FinalAssembler:
+    """Assembles a final CV markdown from comparison data and user approvals."""
+
+    def assemble(self, comparison: dict, approvals: dict) -> str:
+        """Assemble final CV markdown from comparison entries and approval decisions.
+
+        Args:
+            comparison: Dict of comparison entries (from ComparisonEngine.compare()).
+            approvals: Dict mapping category keys to bool (True = use suggested).
+
+        Returns:
+            Final CV markdown string.
+
+        Raises:
+            AssemblyError: If zero approvals are True.
+        """
+        if not approvals or not any(approvals.values()):
+            raise AssemblyError("At least one category must be approved.")
+
+        parts = []
+
+        for cat_key in CVParser.CATEGORY_ORDER:
+            if cat_key == 'professional_experience':
+                # Assemble PE header
+                pe_entry = comparison.get('professional_experience')
+                if pe_entry:
+                    approved = approvals.get('professional_experience', False)
+                    header = pe_entry['suggested_content'] if approved else pe_entry['original_content']
+                    if header:
+                        parts.append(header)
+                        parts.append('')
+
+                # Assemble PE roles in original sequence
+                role_idx = 0
+                while True:
+                    role_key = f'professional_experience.role_{role_idx}'
+                    if role_key not in comparison:
+                        break
+                    role_entry = comparison[role_key]
+                    approved = approvals.get(role_key, False)
+                    content = role_entry['suggested_content'] if approved else role_entry['original_content']
+                    if content:
+                        parts.append(content)
+                        parts.append('')
+                    role_idx += 1
+            else:
+                entry = comparison.get(cat_key)
+                if not entry:
+                    continue
+                approved = approvals.get(cat_key, False)
+                content = entry['suggested_content'] if approved else entry['original_content']
+                if content:
+                    parts.append(content)
+                    parts.append('')
+
+        # Join and normalize blank lines
+        result = '\n'.join(parts)
+        result = re.sub(r'\n{3,}', '\n\n', result)
+        return result.strip() + '\n'
 
 
 # ========== APPLICATIONS API ==========
@@ -922,6 +1472,202 @@ def get_provider_key_by_id(user_id, config_id):
         return None, None
 
 
+# ========== CV COMPARISON API ==========
+
+
+def save_comparison_state(user_id, app_id, comparison_data, approvals, scores):
+    """Persist comparison state to the application record in DynamoDB.
+
+    Args:
+        user_id: User identifier.
+        app_id: Application identifier.
+        comparison_data: Comparison dict from ComparisonEngine.
+        approvals: Dict mapping category keys to bool.
+        scores: Dict with baseline_score, max_score, etc.
+    """
+    if not DYNAMODB_AVAILABLE:
+        return
+
+    try:
+        response = applications_table.get_item(
+            Key={'userId': user_id, 'id': app_id}
+        )
+        item = response.get('Item') or {'userId': user_id, 'id': app_id}
+
+        item['comparisonState'] = {
+            'comparison': comparison_data,
+            'approvals': approvals,
+            'scores': scores,
+            'updatedAt': datetime.now(timezone.utc).isoformat(),
+        }
+        item['timestamp'] = int(datetime.now(timezone.utc).timestamp())
+
+        applications_table.put_item(Item=dynamodb_safe(item))
+    except Exception as e:
+        print(f"[save_comparison_state] Error: {e}")
+
+
+def load_comparison_state(user_id, app_id):
+    """Load comparison state from the application record in DynamoDB.
+
+    Args:
+        user_id: User identifier.
+        app_id: Application identifier.
+
+    Returns:
+        Comparison state dict or None if not found.
+    """
+    if not DYNAMODB_AVAILABLE:
+        return None
+
+    try:
+        response = applications_table.get_item(
+            Key={'userId': user_id, 'id': app_id}
+        )
+        item = response.get('Item')
+        if item and item.get('comparisonState'):
+            return json_safe(item['comparisonState'])
+        return None
+    except Exception as e:
+        print(f"[load_comparison_state] Error: {e}")
+        return None
+
+
+@app.route('/api/compare-cv', methods=['POST'])
+def compare_cv():
+    """Compare original and tailored CVs, returning category-level diff.
+
+    Expects JSON body:
+        userId: User identifier.
+        appId: Application identifier.
+        originalCv: Original CV markdown string.
+        tailoredCv: Tailored CV markdown string.
+        baselineScore: Baseline ATS score (int).
+        categoryScores: Dict mapping category keys to score impact (int).
+
+    Returns:
+        JSON with comparison, baseline_score, max_score, total_changes.
+    """
+    try:
+        data = request.json
+        user_id = data.get('userId', 'default-user')
+        app_id = data.get('appId', '')
+        original_cv = data.get('originalCv', '')
+        tailored_cv = data.get('tailoredCv', '')
+        baseline_score = data.get('baselineScore', 0)
+        category_scores = data.get('categoryScores', {})
+
+        parser = CVParser()
+
+        # Parse both CVs
+        try:
+            original_parsed = parser.parse(original_cv)
+        except ParseError as e:
+            return jsonify({'error': f'Failed to parse original CV: {str(e)}'}), 400
+
+        try:
+            suggested_parsed = parser.parse(tailored_cv)
+        except ParseError as e:
+            return jsonify({'error': f'Failed to parse tailored CV: {str(e)}'}), 400
+
+        # Compare
+        engine = ComparisonEngine()
+        try:
+            comparison = engine.compare(original_parsed, suggested_parsed)
+        except ComparisonError as e:
+            return jsonify({'error': f'Comparison failed: {str(e)}'}), 400
+
+        # Attach score_impact from categoryScores
+        for key, entry in comparison.items():
+            if key in category_scores:
+                entry['score_impact'] = category_scores[key]
+
+        # Calculate totals
+        total_changes = sum(1 for entry in comparison.values() if entry['changed'])
+        max_score = max(0, min(100, baseline_score + sum(category_scores.values())))
+
+        # Persist state if appId provided
+        if app_id:
+            approvals_to_save = data.get('_approvals', {}) if data.get('_saveState') else {}
+            scores = {
+                'baseline_score': baseline_score,
+                'max_score': max_score,
+                'category_scores': category_scores,
+            }
+            save_comparison_state(user_id, app_id, comparison, approvals_to_save, scores)
+
+        return jsonify({
+            'comparison': comparison,
+            'baseline_score': baseline_score,
+            'max_score': max_score,
+            'total_changes': total_changes,
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/assemble-cv', methods=['POST'])
+def assemble_cv():
+    """Assemble final CV from comparison data and user approvals.
+
+    Expects JSON body:
+        userId: User identifier.
+        appId: Application identifier.
+        comparison: Comparison dict (from /api/compare-cv).
+        approvals: Dict mapping category keys to bool.
+
+    Returns:
+        JSON with assembled_cv and final_score.
+    """
+    try:
+        data = request.json
+        user_id = data.get('userId', 'default-user')
+        app_id = data.get('appId', '')
+        comparison = data.get('comparison', {})
+        approvals = data.get('approvals', {})
+
+        assembler = FinalAssembler()
+
+        try:
+            assembled_cv = assembler.assemble(comparison, approvals)
+        except AssemblyError as e:
+            return jsonify({'error': str(e)}), 400
+
+        # Compute final ATS score
+        # Build impacts and approval dicts from comparison
+        impacts = {}
+        for key, entry in comparison.items():
+            impacts[key] = entry.get('score_impact', 0)
+
+        # Use baseline from request body, fall back to persisted state
+        baseline_score = data.get('baselineScore', 0)
+        if not baseline_score and app_id:
+            state = load_comparison_state(user_id, app_id)
+            if state and isinstance(state, dict) and state.get('scores'):
+                baseline_score = state['scores'].get('baseline_score', 0)
+
+        score_result = compute_ats_score(baseline_score, impacts, approvals)
+        final_score = score_result['current_score']
+
+        # Persist updated state
+        if app_id:
+            scores = {
+                'baseline_score': baseline_score,
+                'max_score': score_result['max_score'],
+                'category_scores': impacts,
+            }
+            save_comparison_state(user_id, app_id, comparison, approvals, scores)
+
+        return jsonify({
+            'assembled_cv': assembled_cv,
+            'final_score': final_score,
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 # ========== LLM GENERATION ==========
 
 @app.route('/api/generate', methods=['POST'])
@@ -1033,9 +1779,21 @@ def generate_openai(data, system, user_msg, model, api_key=None):
         except (json.JSONDecodeError, ValueError):
             stripped = fix_json_strings(stripped)
 
-        return jsonify({
+        # Build response, passing through score data if present in LLM output
+        response_data = {
             'content': [{'type': 'text', 'text': stripped}]
-        })
+        }
+        try:
+            parsed_llm = json.loads(stripped)
+            if isinstance(parsed_llm, dict):
+                if 'baseline_score' in parsed_llm:
+                    response_data['baseline_score'] = parsed_llm['baseline_score']
+                if 'category_scores' in parsed_llm:
+                    response_data['category_scores'] = parsed_llm['category_scores']
+        except (json.JSONDecodeError, ValueError, TypeError):
+            pass
+
+        return jsonify(response_data)
 
     except requests.exceptions.Timeout:
         return jsonify({'error': 'OpenAI request timed out. Try again.'}), 504
@@ -1106,9 +1864,21 @@ def generate_custom(data, system, user_msg, model, api_key=None, base_url=''):
         except (json.JSONDecodeError, ValueError):
             stripped = fix_json_strings(stripped)
 
-        return jsonify({
+        # Build response, passing through score data if present in LLM output
+        response_data = {
             'content': [{'type': 'text', 'text': stripped}]
-        })
+        }
+        try:
+            parsed_llm = json.loads(stripped)
+            if isinstance(parsed_llm, dict):
+                if 'baseline_score' in parsed_llm:
+                    response_data['baseline_score'] = parsed_llm['baseline_score']
+                if 'category_scores' in parsed_llm:
+                    response_data['category_scores'] = parsed_llm['category_scores']
+        except (json.JSONDecodeError, ValueError, TypeError):
+            pass
+
+        return jsonify(response_data)
 
     except requests.exceptions.Timeout:
         return jsonify({'error': 'Custom provider request timed out.'}), 504

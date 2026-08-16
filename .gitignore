@@ -2,3 +2,18 @@ node_modules
 data.db
 .env
 .kiro
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment
+venv/
+
+# Test/tooling caches
+.hypothesis/
+.pytest_cache/
+
+# IDE
+.vscode/
