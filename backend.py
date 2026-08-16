@@ -27,16 +27,8 @@ except ImportError:
 app = Flask(__name__)
 CORS(app)
 
-OLLAMA_BASE = (
-    os.environ.get('OLLAMA_BASE')
-    or os.environ.get('OLLAMA_URL')
-    or os.environ.get('OLLAMA_HOST')
-    or 'http://localhost:11434'
-)
-MODEL = os.environ.get('OLLAMA_MODEL', 'mistral')
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 TRANSCRIPTION_MODEL = os.environ.get('OPENAI_TRANSCRIPTION_MODEL', 'gpt-4o-mini-transcribe')
-REQUIRE_OLLAMA_ON_START = os.environ.get('REQUIRE_OLLAMA_ON_START', '').lower() in ('1', 'true', 'yes')
 CAREEROPS_USERNAME = os.environ.get('CAREEROPS_USERNAME', '')
 CAREEROPS_PASSWORD = os.environ.get('CAREEROPS_PASSWORD', '')
 AWS_REGION = os.environ.get('AWS_REGION', 'us-east-1')
@@ -122,25 +114,6 @@ def json_safe(value):
     if isinstance(value, Decimal):
         return int(value) if value % 1 == 0 else float(value)
     return value
-
-def check_ollama():
-    return check_ollama_at(OLLAMA_BASE)
-
-def check_ollama_at(base_url):
-    try:
-        r = requests.get(f'{base_url}/api/tags', timeout=2)
-        return r.status_code == 200
-    except:
-        return False
-
-def resolve_ollama_base(header_base=None):
-    header_base = (header_base or '').strip()
-    if not header_base:
-        return OLLAMA_BASE
-    if 'localhost' in header_base and 'localhost' not in OLLAMA_BASE:
-        return OLLAMA_BASE
-    return header_base
-
 
 def validate_cv_file(file):
     """Validate an uploaded CV file. Returns (None) on success or (error_message) on failure."""
@@ -543,8 +516,6 @@ def delete_question(question_id):
 def health():
     """Health check endpoint"""
     try:
-        ollama_running = check_ollama()
-        
         # Test DynamoDB connection
         dynamodb_status = 'disconnected'
         if DYNAMODB_AVAILABLE:
@@ -556,10 +527,9 @@ def health():
         
         return jsonify({
             'status': 'ok',
-            'ollama': 'connected' if ollama_running else 'disconnected',
-            'model': MODEL,
             'dynamodb': dynamodb_status,
-            'docx_support': DOCX_AVAILABLE
+            'docx_support': DOCX_AVAILABLE,
+            'llm': 'api-based (OpenAI/Anthropic/Custom)'
         })
     except Exception as e:
         return jsonify({
@@ -789,7 +759,7 @@ def create_llm_provider():
 
     provider_type = data.get('provider', '').strip()
     if not provider_type:
-        return jsonify({'error': 'provider is required (openai, anthropic, ollama, custom)'}), 400
+        return jsonify({'error': 'provider is required (openai, anthropic, custom)'}), 400
 
     config_id = data.get('id') or f"{provider_type}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
     api_key = data.get('apiKey', '')
@@ -954,100 +924,44 @@ def get_provider_key_by_id(user_id, config_id):
 def generate():
     try:
         data = request.json
-        provider = data.get('provider', 'ollama')
+        provider = data.get('provider', 'openai')
         system = data.get('system', '')
         user_msg = data.get('user_message', '')
-        model = data.get('model', MODEL)
+        model = data.get('model', 'gpt-4o-mini')
         user_id = data.get('userId', '')
         provider_id = data.get('providerId', '')
 
-        # For non-Ollama providers, fetch API key server-side from encrypted storage
-        if provider in ('openai', 'anthropic', 'custom'):
-            api_key = None
-            provider_config = None
+        # Fetch API key server-side from encrypted storage
+        api_key = None
+        provider_config = None
 
-            print(f"[generate] provider={provider}, userId={user_id}, providerId={provider_id}")
+        print(f"[generate] provider={provider}, userId={user_id}, providerId={provider_id}")
 
-            # Try to fetch key from DynamoDB by provider ID
-            if provider_id and user_id:
-                api_key, provider_config = get_provider_key_by_id(user_id, provider_id)
-            elif user_id:
-                api_key, provider_config = get_active_provider_key(user_id)
+        # Try to fetch key from DynamoDB by provider ID
+        if provider_id and user_id:
+            api_key, provider_config = get_provider_key_by_id(user_id, provider_id)
+        elif user_id:
+            api_key, provider_config = get_active_provider_key(user_id)
 
-            # Fallback to environment variable
-            if not api_key and provider == 'openai':
-                api_key = OPENAI_API_KEY
-                if api_key:
-                    print(f"[generate] Using OPENAI_API_KEY env var fallback")
+        # Fallback to environment variable for OpenAI
+        if not api_key and provider == 'openai':
+            api_key = OPENAI_API_KEY
+            if api_key:
+                print(f"[generate] Using OPENAI_API_KEY env var fallback")
 
-            print(f"[generate] api_key resolved: {'yes' if api_key else 'NO'}")
+        print(f"[generate] api_key resolved: {'yes' if api_key else 'NO'}")
 
-            if provider == 'openai':
-                return generate_openai(data, system, user_msg, model, api_key)
-            elif provider == 'custom':
-                base_url = (provider_config or {}).get('baseUrl', '') if provider_config else ''
-                return generate_custom(data, system, user_msg, model, api_key, base_url)
-            else:
-                return jsonify({'error': f'Provider "{provider}" not yet supported for generation.'}), 400
-
-        # Default: Ollama (no API key needed)
-        ollama_base = resolve_ollama_base(request.headers.get('X-Ollama-Base'))
-
-        if not check_ollama_at(ollama_base):
-            return jsonify({
-                'error': 'Ollama not running',
-                'hint': f'Start Ollama with: ollama serve (at {ollama_base})'
-            }), 503
-
-        messages = []
-        if system:
-            messages.append({'role': 'system', 'content': system})
-        messages.append({'role': 'user', 'content': user_msg})
-
-        response = requests.post(
-            f'{ollama_base}/v1/chat/completions',
-            headers={'Content-Type': 'application/json'},
-            json={
-                'model': model,
-                'messages': messages,
-                'temperature': 0.7,
-                'max_tokens': 12000,
-                'stream': False
-            },
-            timeout=180
-        )
-
-        if response.status_code != 200:
-            return jsonify({
-                'error': f'Ollama error: {response.status_code}',
-                'detail': response.text
-            }), response.status_code
-
-        result = response.json()
-        message_content = result['choices'][0]['message']['content']
-
-        def fix_json_strings(s):
-            def escape_inner(m):
-                inner = m.group(1)
-                inner = inner.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
-                return '"' + inner + '"'
-            return re.sub(r'"((?:[^"\\]|\\.)*)"', escape_inner, s, flags=re.DOTALL)
-
-        stripped = message_content.strip()
-        if stripped.startswith('```'):
-            stripped = re.sub(r'^```(?:json)?\s*', '', stripped)
-            stripped = re.sub(r'```\s*$', '', stripped).strip()
-        try:
-            json.loads(stripped)
-        except (json.JSONDecodeError, ValueError):
-            stripped = fix_json_strings(stripped)
-
-        return jsonify({
-            'content': [{'type': 'text', 'text': stripped}]
-        })
+        if provider == 'openai':
+            return generate_openai(data, system, user_msg, model, api_key)
+        elif provider == 'custom':
+            base_url = (provider_config or {}).get('baseUrl', '') if provider_config else ''
+            return generate_custom(data, system, user_msg, model, api_key, base_url)
+        else:
+            # Default to OpenAI for any unrecognized provider
+            return generate_openai(data, system, user_msg, model, api_key)
 
     except requests.exceptions.Timeout:
-        return jsonify({'error': 'Request timed out (model may still be loading)'}), 504
+        return jsonify({'error': 'Request timed out. Try again.'}), 504
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -1203,22 +1117,8 @@ def generate_custom(data, system, user_msg, model, api_key=None, base_url=''):
 if __name__ == '__main__':
     port = int(os.environ.get('FLASK_PORT', 5001))
 
-    print(f"🔍 Looking for Ollama at {OLLAMA_BASE}...")
-    if not check_ollama():
-        print("⚠️  Ollama is not running!")
-        print("\n📦 Setup steps:")
-        print("  Terminal 1: ollama serve")
-        print("  Terminal 2 (this script): python3 backend.py")
-        print("  Terminal 3: python3 -m http.server 8000")
-        print("\nIf first time:")
-        print("  ollama pull mistral")
-        if REQUIRE_OLLAMA_ON_START:
-            exit(1)
-    else:
-        print("✅ Ollama connected!")
-    
     if DYNAMODB_AVAILABLE:
-        print(f"\n🔍 Checking DynamoDB...")
+        print(f"🔍 Checking DynamoDB...")
         try:
             applications_table.table_status
             print("✅ DynamoDB connected!")
@@ -1227,10 +1127,11 @@ if __name__ == '__main__':
     else:
         print("\n⚠️  DynamoDB not available")
     
-    print(f"📦 Using model: {MODEL}")
+    print(f"🔑 Encryption: {'configured' if fernet else 'NOT available'}")
     print(f"🚀 Backend running on http://localhost:{port}")
     print(f"📄 Frontend: http://localhost:8000/careerops.html")
     print(f"✓ Health check: http://localhost:{port}/api/health")
+    print(f"🤖 LLM: API-based (OpenAI/Anthropic/Custom via Settings)")
     host = os.environ.get('FLASK_HOST', '127.0.0.1')
     debug = os.environ.get('FLASK_DEBUG', 'false').lower() in ('1', 'true', 'yes')
     app.run(host=host, port=port, debug=debug)

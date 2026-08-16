@@ -411,23 +411,13 @@
       <div class="field">
         <label>Provider type</label>
         <select id="providerType">
-          <option value="ollama">Ollama (local, no API key)</option>
           <option value="openai">OpenAI (ChatGPT)</option>
           <option value="anthropic">Anthropic (Claude)</option>
           <option value="custom">Custom OpenAI-compatible</option>
         </select>
       </div>
 
-      <div id="providerOllamaFields">
-        <div class="field">
-          <label>Ollama base URL</label>
-          <input type="text" id="providerOllamaBase" placeholder="http://localhost:11434 (default)">
-        </div>
-        <div class="field">
-          <label>Model</label>
-          <input type="text" id="providerOllamaModel" placeholder="mistral" value="mistral">
-        </div>
-      </div>
+      <div id="providerOllamaFields" style="display:none;"></div>
 
       <div id="providerOpenaiFields" style="display:none;">
         <div class="field">
@@ -765,10 +755,9 @@ let currentRtab = 'cv';
 
 // LLM configuration
 let llmConfig = {
-  type: 'ollama',
+  type: 'openai',
   activeProviderId: null,
-  ollama: { base: '', model: 'mistral' },
-  openai: { model: 'gpt-4o' },
+  openai: { model: 'gpt-4o-mini' },
   anthropic: { model: '' },
   custom: { base: '', model: '' }
 };
@@ -847,10 +836,8 @@ async function loadProviders(){
     const active = savedProviders.find(p => p.isActive);
     if(active){
       llmConfig.type = active.provider;
-      if(active.provider === 'ollama'){
-        llmConfig.ollama = { base: active.baseUrl || '', model: active.model || 'mistral' };
-      } else if(active.provider === 'openai'){
-        llmConfig.openai = { model: active.model || 'gpt-4o' };
+      if(active.provider === 'openai'){
+        llmConfig.openai = { model: active.model || 'gpt-4o-mini' };
       } else if(active.provider === 'anthropic'){
         llmConfig.anthropic = { model: active.model || '' };
       } else if(active.provider === 'custom'){
@@ -867,9 +854,8 @@ async function loadProviders(){
     try{
       const pref = JSON.parse(localStorage.getItem('llm-provider-pref') || 'null');
       if(pref){
-        llmConfig.type = pref.type || 'ollama';
-        if(pref.type === 'openai') llmConfig.openai = { model: pref.model || 'gpt-4o' };
-        else if(pref.type === 'ollama') llmConfig.ollama = { base: '', model: pref.model || 'mistral' };
+        llmConfig.type = pref.type || 'openai';
+        if(pref.type === 'openai') llmConfig.openai = { model: pref.model || 'gpt-4o-mini' };
       }
     }catch(e2){}
     renderProvidersList();
@@ -897,7 +883,7 @@ function renderProvidersList(){
   }
   container.innerHTML = savedProviders.map(p => {
     const isActive = p.isActive;
-    const keyInfo = p.apiKeyMasked ? `Key: ${escapeHtml(p.apiKeyMasked)}` : (p.provider === 'ollama' ? 'No key needed' : 'No key set');
+    const keyInfo = p.apiKeyMasked ? `Key: ${escapeHtml(p.apiKeyMasked)}` : 'No key set';
     return `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid ${isActive ? 'var(--teal)' : 'var(--line)'};border-radius:6px;margin-bottom:8px;background:${isActive ? 'rgba(45,212,191,.06)' : 'var(--panel-2)'};">
       <div style="flex:1;">
         <div style="color:${isActive ? 'var(--teal)' : 'var(--text)'};font-weight:500;">${escapeHtml(p.label || p.provider)}${isActive ? ' <span style="opacity:.6;font-weight:400;">(active)</span>' : ''}</div>
@@ -911,7 +897,7 @@ function renderProvidersList(){
 
 function updateProviderFormFields(){
   const type = document.getElementById('providerType').value;
-  document.getElementById('providerOllamaFields').style.display = type === 'ollama' ? 'block' : 'none';
+  document.getElementById('providerOllamaFields').style.display = 'none';
   document.getElementById('providerOpenaiFields').style.display = type === 'openai' ? 'block' : 'none';
   document.getElementById('providerAnthropicFields').style.display = type === 'anthropic' ? 'block' : 'none';
   document.getElementById('providerCustomFields').style.display = type === 'custom' ? 'block' : 'none';
@@ -933,11 +919,7 @@ document.getElementById('saveProviderBtn').addEventListener('click', async ()=>{
 
   if(editingProviderId) payload.id = editingProviderId;
 
-  if(type === 'ollama'){
-    payload.baseUrl = document.getElementById('providerOllamaBase').value.trim();
-    payload.model = document.getElementById('providerOllamaModel').value.trim() || 'mistral';
-    payload.label = `Ollama — ${payload.model}`;
-  } else if(type === 'openai'){
+  if(type === 'openai'){
     payload.apiKey = document.getElementById('providerOpenaiKey').value.trim();
     payload.model = document.getElementById('providerOpenaiModel').value;
     payload.label = `OpenAI — ${payload.model}`;
@@ -974,8 +956,7 @@ document.getElementById('saveProviderBtn').addEventListener('click', async ()=>{
     // API key will be resolved server-side via env var
     localStorage.setItem('llm-provider-pref', JSON.stringify({ type: payload.provider, model: payload.model }));
     llmConfig.type = payload.provider;
-    if(payload.provider === 'openai') llmConfig.openai = { model: payload.model || 'gpt-4o' };
-    else if(payload.provider === 'ollama') llmConfig.ollama = { base: payload.baseUrl || '', model: payload.model || 'mistral' };
+    if(payload.provider === 'openai') llmConfig.openai = { model: payload.model || 'gpt-4o-mini' };
     else if(payload.provider === 'custom') llmConfig.custom = { base: payload.baseUrl || '', model: payload.model || '' };
 
     statusEl.textContent = 'saved locally ✓';
@@ -995,9 +976,7 @@ function resetProviderForm(){
   editingProviderId = null;
   document.getElementById('providerFormTitle').textContent = 'Add new provider';
   document.getElementById('cancelEditProviderBtn').style.display = 'none';
-  document.getElementById('providerType').value = 'ollama';
-  document.getElementById('providerOllamaBase').value = '';
-  document.getElementById('providerOllamaModel').value = 'mistral';
+  document.getElementById('providerType').value = 'openai';
   document.getElementById('providerOpenaiKey').value = '';
   document.getElementById('providerOpenaiModel').value = 'gpt-4o';
   document.getElementById('providerAnthropicKey').value = '';
@@ -1046,7 +1025,7 @@ async function checkHealth(){
     if(r.ok){
       const data = await r.json();
       const activeProvider = savedProviders.find(p => p.isActive);
-      const providerLabel = activeProvider ? activeProvider.label : 'Ollama (default)';
+      const providerLabel = activeProvider ? activeProvider.label : 'Not configured';
       statusEl.innerHTML = `<span style="color:var(--green);">✓ Backend connected</span><br><span style="color:var(--muted);font-size:11px;">Active: ${escapeHtml(providerLabel)}</span>`;
     } else {
       statusEl.innerHTML = `<span style="color:var(--red);">✗ Backend returned ${r.status}</span>`;
@@ -1444,8 +1423,8 @@ async function callLlm(userMsg, systemMsg, maxTokens){
   // All LLM calls go through the backend which fetches keys server-side.
   // Frontend never sends API keys — only the userId and provider config ID.
   const body = {
-    provider: llmConfig.type || 'ollama',
-    model: llmConfig[llmConfig.type]?.model || llmConfig.ollama?.model || 'mistral',
+    provider: llmConfig.type || 'openai',
+    model: llmConfig[llmConfig.type]?.model || 'gpt-4o-mini',
     max_tokens: maxTokens,
     user_message: userMsg,
     userId: storageUserId()
@@ -1454,10 +1433,6 @@ async function callLlm(userMsg, systemMsg, maxTokens){
   if(systemMsg) body.system = systemMsg;
 
   const headers = { 'Content-Type': 'application/json' };
-  // For Ollama, pass base URL hint (no secret)
-  if(llmConfig.type === 'ollama' && llmConfig.ollama?.base?.trim()){
-    headers['X-Ollama-Base'] = llmConfig.ollama.base.trim();
-  }
 
   const r = await fetch('/api/generate', {
     method: 'POST', headers, body: JSON.stringify(body)
@@ -1476,8 +1451,8 @@ async function callLlm(userMsg, systemMsg, maxTokens){
 async function callLlmRaw(userMsg, systemMsg, maxTokens){
   // Same as callLlm but tolerant of non-JSON responses (returns parsed object or raw string)
   const body = {
-    provider: llmConfig.type || 'ollama',
-    model: llmConfig[llmConfig.type]?.model || llmConfig.ollama?.model || 'mistral',
+    provider: llmConfig.type || 'openai',
+    model: llmConfig[llmConfig.type]?.model || 'gpt-4o-mini',
     max_tokens: maxTokens,
     user_message: userMsg,
     userId: storageUserId()
@@ -1486,9 +1461,6 @@ async function callLlmRaw(userMsg, systemMsg, maxTokens){
   if(systemMsg) body.system = systemMsg;
 
   const headers = { 'Content-Type': 'application/json' };
-  if(llmConfig.type === 'ollama' && llmConfig.ollama?.base?.trim()){
-    headers['X-Ollama-Base'] = llmConfig.ollama.base.trim();
-  }
 
   const r = await fetch('/api/generate', {
     method: 'POST', headers, body: JSON.stringify(body)
@@ -1689,10 +1661,7 @@ Output the improved CV now:`;
     statusEl.textContent = '';
     let msg = err.message || 'Generation failed';
     if(msg.includes('Failed to fetch') || msg.includes('NetworkError')){
-      msg = 'Cannot reach backend. Is it running on port 5000? (python3 backend.py)';
-    }
-    if(msg.includes('Ollama')){
-      msg = 'Ollama not responding. Start it with: ollama serve';
+      msg = 'Cannot reach backend. Is it running?';
     }
     toast(msg, true);
   }finally{
