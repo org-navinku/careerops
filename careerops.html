@@ -2046,8 +2046,8 @@ function parseCvSections(cvText){
       continue;
     }
     if(/^## (KEY SKILLS|PROFESSIONAL EXPERIENCE|EDUCATION)/.test(line)){
-      if(currentSection === 'summary' && sections.summary) break;
       if(line.includes('PROFESSIONAL')) currentSection = 'roles';
+      else if(line.includes('EDUCATION')) currentSection = 'education';
       continue;
     }
 
@@ -2063,7 +2063,7 @@ function parseCvSections(cvText){
       }
       currentRole = { header: line.replace(/^### /, ''), bullets: [] };
     }
-    if(line.startsWith('- ') && currentRole){
+    if(line.startsWith('- ') && currentRole && currentSection === 'roles'){
       currentRole.bullets.push(line.replace(/^- /, ''));
     }
   }
@@ -2155,7 +2155,7 @@ function renderCvComparison(comparison){
 
   // Attach checkbox listeners - use delegation for dynamic checkboxes
   setTimeout(() => {
-    document.querySelectorAll('.bullet-check').forEach(checkbox => {
+    document.querySelectorAll('.comparison-checkbox:not([disabled])').forEach(checkbox => {
       checkbox.removeEventListener('change', updateComparisonStats);
       checkbox.addEventListener('change', updateComparisonStats);
     });
@@ -2164,9 +2164,9 @@ function renderCvComparison(comparison){
 }
 
 function updateComparisonStats(){
-  const bulletCheckboxes = document.querySelectorAll('.bullet-check');
-  const approved = Array.from(bulletCheckboxes).filter(cb => cb.checked).length;
-  const total = bulletCheckboxes.length;
+  const allCheckboxes = document.querySelectorAll('.comparison-checkbox');
+  const approved = Array.from(allCheckboxes).filter(cb => cb.checked).length;
+  const total = allCheckboxes.length;
   const stats = document.getElementById('comparisonSummaryStats');
   if(stats){
     stats.textContent = `${approved} of ${total} changes approved | Ready to generate: ${approved > 0 ? '✓' : '❌'}`;
