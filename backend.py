@@ -697,11 +697,15 @@ def generate_docx():
         doc.save(buffer)
         buffer.seek(0)
 
+        filename = (data or {}).get('filename', 'CV.docx')
+        if not filename.lower().endswith('.docx'):
+            filename += '.docx'
+
         return send_file(
             buffer,
             mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             as_attachment=True,
-            download_name='CV.docx'
+            download_name=filename
         )
 
     except Exception as e:

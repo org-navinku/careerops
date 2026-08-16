@@ -2090,23 +2090,51 @@ function offerPdfDownload(rawText, title, kind, atsResult){
 
 document.getElementById('downloadCvBtn').addEventListener('click', async ()=>{
   if(!currentPackage) return;
-  const name = `CV_${(currentPackage.company||'Application').replace(/[^a-z0-9]/gi,'_')}.docx`;
+  if(!currentPackage.tailoredCV || currentPackage.tailoredCV.trim().length < 50){
+    toast('CV is empty. Generate a tailored CV first.', true);
+    return;
+  }
+  const company = (currentPackage.company || 'Application').replace(/[^a-z0-9]/gi, '_');
+  const role = (currentPackage.role || 'CV').replace(/[^a-z0-9]/gi, '_').slice(0, 20);
+  const name = `Navin_Kumar_${role}_${company}.docx`;
+  const btnEl = document.getElementById('downloadCvBtn');
+  const originalText = btnEl.textContent;
+
   try{
+    btnEl.disabled = true;
+    btnEl.textContent = 'Generating DOCX...';
+
     const r = await fetch('/api/generate-docx', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ cv_text: currentPackage.tailoredCV })
     });
-    if(!r.ok){ const e = await r.json(); toast(e.error || 'DOCX generation failed', true); return; }
+
+    if(!r.ok){
+      const e = await r.json();
+      throw new Error(e.error || 'DOCX generation failed');
+    }
+
     const blob = await r.blob();
+    if(blob.size === 0) throw new Error('Generated file is empty');
+
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = name; a.rel = 'noopener';
-    document.body.appendChild(a); a.click(); a.remove();
+    a.href = url;
+    a.download = name;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
     setTimeout(()=> URL.revokeObjectURL(url), 5000);
-    toast('DOCX downloaded — open in Word to review and edit.');
+    toast(`✓ DOCX downloaded as "${name}" — open in Word to review and edit.`);
   }catch(err){
-    toast('Could not reach backend for DOCX generation.', true);
+    console.error('DOCX generation error:', err);
+    toast(`DOCX generation failed: ${err.message}`, true);
+  }finally{
+    btnEl.disabled = false;
+    btnEl.textContent = originalText;
   }
 });
 document.getElementById('downloadCoverBtn').addEventListener('click', ()=>{
