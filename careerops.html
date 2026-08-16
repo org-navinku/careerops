@@ -177,6 +177,21 @@
   .login-footer{text-align:center;margin-top:16px;font-size:12px;color:var(--muted);}
   .login-footer a{color:var(--teal);text-decoration:none;}
   .login-footer a:hover{text-decoration:underline;}
+
+  /* CV Comparison Styles */
+  .comparison-section{margin-bottom:12px;padding:8px;background:var(--panel-1);border-radius:4px;border-left:3px solid var(--teal);}
+  .comparison-header{font-size:11px;font-weight:600;color:var(--text);margin-bottom:6px;display:flex;align-items:center;gap:6px;}
+  .comparison-change{margin:8px 0;padding:8px;background:var(--panel-2);border-radius:4px;font-size:11px;}
+  .comparison-original{color:var(--muted);margin-bottom:4px;}
+  .comparison-tailored{color:var(--green);font-weight:500;margin-bottom:4px;}
+  .ats-badge{display:inline-block;padding:2px 6px;background:var(--green);color:#000;border-radius:3px;font-size:10px;font-weight:600;margin:4px 0;}
+  .ats-badge.improved{background:var(--green);}
+  .ats-badge.minor{background:var(--amber);}
+  .ats-badge.unchanged{background:var(--muted);}
+  .keywords-added{font-size:10px;color:var(--teal);margin-top:4px;}
+  .jd-match{font-size:10px;color:var(--green);margin-top:4px;display:flex;align-items:center;gap:4px;}
+  .comparison-checkbox{width:16px;height:16px;margin-right:6px;cursor:pointer;vertical-align:middle;}
+  .comparison-stats{font-size:11px;color:var(--muted);padding:8px;background:var(--panel-1);border-radius:4px;margin:8px 0;}
 </style>
 </head>
 <body>
@@ -276,6 +291,30 @@
         </div>
         <div class="result-content editable" id="rtContent" contenteditable="true"></div>
         <div class="skill-tags" id="skillTags"></div>
+
+        <!-- CV COMPARISON & MERGE PANEL -->
+        <div id="cvComparisonPanel" style="display:none;margin-top:20px;padding:16px;background:var(--panel-2);border-radius:8px;border:1px solid var(--border);">
+          <div style="margin-bottom:16px;">
+            <h3 style="margin:0 0 8px 0;font-size:14px;font-weight:600;">📊 CV Tailoring Review - ATS Score Impact</h3>
+            <div id="atsComparisonSummary" style="font-size:12px;color:var(--text);margin:8px 0;padding:8px;background:var(--panel-1);border-radius:4px;"></div>
+          </div>
+
+          <div id="comparisonContent" style="max-height:500px;overflow-y:auto;margin-bottom:16px;"></div>
+
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+            <button class="btn ghost" id="acceptAllChangesBtn" style="font-size:11px;">✓ Accept All</button>
+            <button class="btn ghost" id="rejectAllChangesBtn" style="font-size:11px;">✗ Reject All</button>
+            <button class="btn ghost" id="smartAcceptBtn" style="font-size:11px;">🎯 Smart Accept (ATS +10+)</button>
+          </div>
+
+          <div id="comparisonSummaryStats" style="font-size:11px;color:var(--muted);margin-bottom:12px;"></div>
+
+          <div style="display:flex;gap:8px;">
+            <button class="btn ghost" id="backToEditBtn" style="font-size:11px;">← Back</button>
+            <button class="btn primary" id="generateFinalCvBtn" style="font-size:11px;">✓ Generate Final CV</button>
+          </div>
+        </div>
+
         <div class="btn-row" style="margin-top:16px;">
           <button class="btn" id="downloadCvBtn">Download CV (DOCX)</button>
           <button class="btn" id="downloadCoverBtn">Download Cover Letter (PDF)</button>
@@ -1664,9 +1703,21 @@ Output the improved CV now:`;
     document.getElementById('matchMeta').textContent = currentPackage.company || currentPackage.role
       ? `— ${currentPackage.company || 'Unknown Co.'} / ${currentPackage.role || 'role'}` : '';
     document.getElementById('pdfLinks').innerHTML = '';
+
+    // Store original CV and create comparison
+    currentPackage.originalCV = parsed && llmRoleBullets ? assembleCvMarkdown(parsed, null, null) : baseCv;
+    const originalAts = computeATSScore(jd, currentPackage.originalCV);
+    currentPackage.comparison = createCvComparison(currentPackage.originalCV, currentPackage.tailoredCV, originalAts, atsResult, jd);
+
     showResultTab('cv');
     document.getElementById('resultBlock').style.display = 'block';
-    document.getElementById('resultBlock').scrollIntoView({behavior:'smooth', block:'start'});
+
+    // Show comparison panel after a brief delay
+    setTimeout(()=>{
+      renderCvComparison(currentPackage.comparison);
+      document.getElementById('resultBlock').scrollIntoView({behavior:'smooth', block:'start'});
+    }, 500);
+
     statusEl.textContent = '';
   }catch(err){
     console.error('Generation error:', err);
@@ -1705,6 +1756,100 @@ function showResultTab(which){
     atsBlock.style.display = 'none';
   }
 }
+
+// CV Comparison & Merge Handlers
+document.getElementById('downloadCvBtn').addEventListener('click', ()=>{
+  if(!currentPackage) return;
+
+  // Check if comparison panel is visible (user hasn't merged yet)
+  if(document.getElementById('cvComparisonPanel').style.display !== 'none'){
+    toast('Please review and generate final CV first', true);
+    return;
+  }
+
+  const name = `Navin_Kumar_${(currentPackage.role || 'CV').replace(/[^a-z0-9]/gi, '_').slice(0, 20)}_${(currentPackage.company || 'Application').replace(/[^a-z0-9]/gi, '_')}.docx`;
+  const btnEl = document.getElementById('downloadCvBtn');
+  const originalText = btnEl.textContent;
+
+  try{
+    btnEl.disabled = true;
+    btnEl.textContent = 'Generating DOCX...';
+
+    fetch('/api/generate-docx', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ cv_text: currentPackage.mergedCV || currentPackage.tailoredCV })
+    }).then(r => {
+      if(!r.ok) throw new Error('DOCX generation failed');
+      return r.blob();
+    }).then(blob => {
+      if(blob.size === 0) throw new Error('Generated file is empty');
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = name; a.rel = 'noopener';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=> URL.revokeObjectURL(url), 5000);
+      toast(`✓ Downloaded: ${name}`);
+    }).catch(err => {
+      toast(`Error: ${err.message}`, true);
+    }).finally(() => {
+      btnEl.disabled = false;
+      btnEl.textContent = originalText;
+    });
+  }catch(err){
+    toast('DOCX generation failed', true);
+    btnEl.disabled = false;
+    btnEl.textContent = originalText;
+  }
+});
+
+document.getElementById('acceptAllChangesBtn')?.addEventListener('click', ()=>{
+  document.querySelectorAll('.comparison-checkbox').forEach(cb => cb.checked = true);
+  updateComparisonStats();
+});
+
+document.getElementById('rejectAllChangesBtn')?.addEventListener('click', ()=>{
+  document.querySelectorAll('.comparison-checkbox').forEach(cb => cb.checked = false);
+  updateComparisonStats();
+});
+
+document.getElementById('smartAcceptBtn')?.addEventListener('click', ()=>{
+  document.querySelectorAll('.ats-badge.improved').forEach(badge => {
+    const checkbox = badge.closest('.comparison-change').querySelector('.comparison-checkbox');
+    if(checkbox) checkbox.checked = true;
+  });
+  updateComparisonStats();
+});
+
+document.getElementById('backToEditBtn')?.addEventListener('click', ()=>{
+  document.getElementById('cvComparisonPanel').style.display = 'none';
+});
+
+document.getElementById('generateFinalCvBtn')?.addEventListener('click', ()=>{
+  if(!currentPackage || !currentPackage.comparison) return;
+
+  // Check if at least one change is approved
+  const approved = document.querySelectorAll('.comparison-checkbox:checked').length;
+  if(approved === 0){
+    toast('Please approve at least one change', true);
+    return;
+  }
+
+  // Merge changes
+  currentPackage.mergedCV = mergeCvChanges(currentPackage.originalCV, currentPackage.tailoredCV, currentPackage.comparison);
+
+  // Hide comparison panel
+  document.getElementById('cvComparisonPanel').style.display = 'none';
+
+  // Update display with merged CV
+  document.getElementById('rtContent').textContent = currentPackage.mergedCV;
+
+  // Recalculate ATS for merged CV
+  currentPackage.atsResult = computeATSScore(currentPackage.jd, currentPackage.mergedCV);
+  renderAtsScore(currentPackage.atsResult);
+
+  toast('✓ Final CV generated - Ready to download');
+});
 
 document.getElementById('rescoreBtn').addEventListener('click', ()=>{
   if(!currentPackage) return;
@@ -1815,6 +1960,252 @@ function computeATSScore(jdText, cvText){
 
   const total = Math.round(kwPoints + sectionPoints + quantPoints + formatPoints + lengthPoints);
   return { score: Math.max(0, Math.min(100, total)), matched, missing, targetKeywords };
+}
+
+// ---------- CV COMPARISON & MERGE SYSTEM ----------
+function createCvComparison(originalCv, tailoredCv, originalAts, tailoredAts, jd){
+  const comparison = {
+    original_ats: originalAts.score,
+    tailored_ats: tailoredAts.score,
+    ats_improvement: tailoredAts.score - originalAts.score,
+    changes: [],
+    approved_changes: []
+  };
+
+  // Parse both CVs into sections
+  const originalSections = parseCvSections(originalCv);
+  const tailoredSections = parseCvSections(tailoredCv);
+
+  // Compare Summary
+  if(originalSections.summary !== tailoredSections.summary){
+    const keywords_added = extractNewKeywords(originalSections.summary, tailoredSections.summary);
+    comparison.changes.push({
+      type: 'summary',
+      original: originalSections.summary,
+      tailored: tailoredSections.summary,
+      keywords_added,
+      jd_matches: keywords_added.filter(kw => jd.toLowerCase().includes(kw.toLowerCase())),
+      approved: true  // Auto-approve summary
+    });
+  }
+
+  // Compare each role's bullets
+  originalSections.roles.forEach((origRole, idx) => {
+    const tailRole = tailoredSections.roles[idx];
+    if(!tailRole) return;
+
+    const roleComparison = {
+      type: 'role',
+      role_header: origRole.header,
+      bullets: []
+    };
+
+    origRole.bullets.forEach((origBullet, bidx) => {
+      const tailBullet = tailRole.bullets[bidx] || origBullet;
+      if(origBullet !== tailBullet){
+        const orig_ats = computeATSScore(jd, origBullet).score;
+        const tail_ats = computeATSScore(jd, tailBullet).score;
+        const keywords_added = extractNewKeywords(origBullet, tailBullet);
+
+        roleComparison.bullets.push({
+          index: bidx,
+          original: origBullet,
+          tailored: tailBullet,
+          ats_original: orig_ats,
+          ats_tailored: tail_ats,
+          ats_improvement: tail_ats - orig_ats,
+          keywords_added,
+          jd_matches: keywords_added.filter(kw => jd.toLowerCase().includes(kw.toLowerCase())),
+          approved: tail_ats - orig_ats >= 10  // Auto-approve high improvements
+        });
+      }
+    });
+
+    if(roleComparison.bullets.length > 0){
+      comparison.changes.push(roleComparison);
+    }
+  });
+
+  return comparison;
+}
+
+function parseCvSections(cvText){
+  const sections = { summary: '', roles: [] };
+  const lines = cvText.split('\n').map(l => l.trim());
+  let currentSection = null;
+  let currentRole = null;
+
+  for(let i = 0; i < lines.length; i++){
+    const line = lines[i];
+    if(!line) continue;
+
+    // Detect summary
+    if(/^## SUMMARY/.test(line)){
+      currentSection = 'summary';
+      continue;
+    }
+    if(/^## (KEY SKILLS|PROFESSIONAL EXPERIENCE|EDUCATION)/.test(line)){
+      if(currentSection === 'summary' && sections.summary) break;
+      if(line.includes('PROFESSIONAL')) currentSection = 'roles';
+      continue;
+    }
+
+    // Capture summary text
+    if(currentSection === 'summary' && !line.startsWith('##')){
+      sections.summary += (sections.summary ? ' ' : '') + line;
+    }
+
+    // Capture roles and bullets
+    if(line.startsWith('### ') && currentSection === 'roles'){
+      if(currentRole && currentRole.bullets.length > 0){
+        sections.roles.push(currentRole);
+      }
+      currentRole = { header: line.replace(/^### /, ''), bullets: [] };
+    }
+    if(line.startsWith('- ') && currentRole){
+      currentRole.bullets.push(line.replace(/^- /, ''));
+    }
+  }
+
+  if(currentRole && currentRole.bullets.length > 0){
+    sections.roles.push(currentRole);
+  }
+
+  return sections;
+}
+
+function extractNewKeywords(original, tailored){
+  const origWords = new Set((original || '').toLowerCase().split(/\W+/).filter(w => w.length > 3));
+  const tailWords = new Set((tailored || '').toLowerCase().split(/\W+/).filter(w => w.length > 3));
+  return Array.from(tailWords).filter(w => !origWords.has(w)).slice(0, 8);
+}
+
+function renderCvComparison(comparison){
+  const panel = document.getElementById('cvComparisonPanel');
+  const content = document.getElementById('comparisonContent');
+
+  // Render summary
+  const summaryHtml = `
+    <div class="comparison-section">
+      <div class="comparison-header">✓ SUMMARY (Auto-Accepted)</div>
+      <div class="comparison-change">
+        <div class="comparison-original"><strong>Original:</strong> ${comparison.changes[0]?.original.substring(0, 100)}...</div>
+        <div class="comparison-tailored"><strong>Tailored:</strong> ${comparison.changes[0]?.tailored.substring(0, 100)}...</div>
+        ${comparison.changes[0]?.keywords_added ? `<div class="keywords-added">📌 Keywords added: ${comparison.changes[0].keywords_added.join(', ')}</div>` : ''}
+        ${comparison.changes[0]?.jd_matches.length > 0 ? `<div class="jd-match">✓ Matches JD: ${comparison.changes[0].jd_matches.join(', ')}</div>` : ''}
+      </div>
+    </div>
+  `;
+
+  // Render role changes
+  let rolesHtml = '';
+  comparison.changes.forEach(change => {
+    if(change.type === 'role'){
+      rolesHtml += `<div class="comparison-section">
+        <div class="comparison-header">Role: ${change.role_header}</div>`;
+
+      change.bullets.forEach(bullet => {
+        const atsClass = bullet.ats_improvement >= 10 ? 'improved' : bullet.ats_improvement >= 5 ? 'minor' : 'unchanged';
+        rolesHtml += `
+          <div class="comparison-change">
+            <label style="display:flex;align-items:flex-start;">
+              <input type="checkbox" class="comparison-checkbox bullet-check" data-role-idx="${change.role_idx}" data-bullet-idx="${bullet.index}" ${bullet.approved ? 'checked' : ''}>
+              <div style="flex:1;">
+                <div class="comparison-original"><strong>Original:</strong> ${bullet.original.substring(0, 80)}...</div>
+                <div class="comparison-tailored"><strong>Tailored:</strong> ${bullet.tailored.substring(0, 80)}...</div>
+                <div class="ats-badge ${atsClass}">ATS ${bullet.ats_original}→${bullet.ats_tailored} (+${bullet.ats_improvement})</div>
+                ${bullet.keywords_added.length > 0 ? `<div class="keywords-added">📌 ${bullet.keywords_added.join(', ')}</div>` : ''}
+                ${bullet.jd_matches.length > 0 ? `<div class="jd-match">✓ ${bullet.jd_matches.join(', ')}</div>` : ''}
+              </div>
+            </label>
+          </div>
+        `;
+      });
+
+      rolesHtml += '</div>';
+    }
+  });
+
+  content.innerHTML = summaryHtml + rolesHtml;
+
+  // Render summary stats
+  const stats = document.getElementById('comparisonSummaryStats');
+  const approved = document.querySelectorAll('.comparison-checkbox:checked').length;
+  const total = document.querySelectorAll('.comparison-checkbox').length;
+  stats.textContent = `${approved} of ${total} changes approved`;
+
+  // Render top summary
+  const summary = document.getElementById('atsComparisonSummary');
+  const improvementColor = comparison.ats_improvement >= 10 ? 'var(--green)' : comparison.ats_improvement >= 5 ? 'var(--amber)' : 'var(--red)';
+  summary.innerHTML = `
+    Original ATS: <strong>${comparison.original_ats}/100</strong> → Tailored ATS: <strong>${comparison.tailored_ats}/100</strong>
+    <span style="color:${improvementColor};font-weight:600;"> (+${comparison.ats_improvement} points) ${comparison.ats_improvement > 0 ? '✓' : ''}</span>
+  `;
+
+  panel.style.display = 'block';
+
+  // Attach checkbox listeners
+  document.querySelectorAll('.bullet-check').forEach(checkbox => {
+    checkbox.addEventListener('change', updateComparisonStats);
+  });
+}
+
+function updateComparisonStats(){
+  const approved = document.querySelectorAll('.comparison-checkbox:checked').length;
+  const total = document.querySelectorAll('.comparison-checkbox').length;
+  const stats = document.getElementById('comparisonSummaryStats');
+  stats.textContent = `${approved} of ${total} changes approved | Ready to generate: ${approved > 0 ? '✓' : '❌'}`;
+}
+
+function mergeCvChanges(originalCv, tailoredCv, comparison){
+  // Get user approvals from checkboxes
+  const approvedBullets = new Set();
+  document.querySelectorAll('.bullet-check:checked').forEach(cb => {
+    approvedBullets.add(cb.dataset.bulletIdx);
+  });
+
+  const originalSections = parseCvSections(originalCv);
+  const tailoredSections = parseCvSections(tailoredCv);
+  const lines = [];
+
+  // Add name and contact
+  const originalLines = originalCv.split('\n');
+  let i = 0;
+  while(i < originalLines.length && !originalLines[i].includes('## SUMMARY')){
+    lines.push(originalLines[i]);
+    i++;
+  }
+
+  // Add summary (always approved)
+  lines.push('## SUMMARY');
+  const summaryChange = comparison.changes.find(c => c.type === 'summary');
+  lines.push(summaryChange ? summaryChange.tailored : originalSections.summary);
+  lines.push('');
+
+  // Add role bullets with user-approved changes
+  lines.push('## PROFESSIONAL EXPERIENCE');
+  originalSections.roles.forEach((role, roleIdx) => {
+    lines.push('### ' + role.header);
+
+    const tailRole = tailoredSections.roles[roleIdx];
+    role.bullets.forEach((bullet, bulletIdx) => {
+      const approvedStr = bulletIdx.toString();
+      if(approvedBullets.has(approvedStr) && tailRole && tailRole.bullets[bulletIdx]){
+        lines.push('- ' + tailRole.bullets[bulletIdx]);
+      } else {
+        lines.push('- ' + bullet);
+      }
+    });
+    lines.push('');
+  });
+
+  // Add remaining sections from original (unchanged)
+  const eduStart = originalCv.indexOf('## EDUCATION');
+  if(eduStart > 0){
+    lines.push(originalCv.substring(eduStart));
+  }
+
+  return lines.join('\n');
 }
 
 function renderAtsScore(result){
