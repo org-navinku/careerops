@@ -9,14 +9,14 @@ CareerOps is now containerized and ready for deployment to AWS ECR (Elastic Cont
 - Docker installed locally
 - AWS CLI configured
 - AWS account with ECR permissions
-- Ollama running (for LLM features)
+- LLM provider API key (OpenAI, Anthropic, or custom — configured in-app)
 
 ## Local Docker Build & Test
 
 ### 1. Build the Docker image locally
 
 ```bash
-cd /Users/navinkumar/workrepos/pers-prj/careerops
+cd /path/to/careerops
 
 # Build the image
 docker build -t careerops:latest .
@@ -281,11 +281,9 @@ docker run -it careerops:latest /bin/bash
 
 ### Health check failing
 ```bash
-# The health check requires Ollama to be running
-# Either:
-# 1. Start Ollama: ollama serve
-# 2. Or disable health check for testing
-# 3. Or set OLLAMA_BASE to running instance
+# The health check verifies DynamoDB connectivity
+# Ensure AWS credentials are available to the container
+# (via env vars, IAM role, or mounted ~/.aws/credentials)
 ```
 
 ### ECR push fails

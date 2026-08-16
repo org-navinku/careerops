@@ -17,3 +17,7 @@ venv/
 
 # IDE
 .vscode/
+
+# Generated outputs
+*_Tailored_CV.md
+*_CV.md

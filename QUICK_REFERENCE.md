@@ -19,13 +19,20 @@ Tab 1: DEPLOY
 ├─ Paste the full job description
 ├─ Click "Generate application package"
 │  └─ LLM tailors your CV (30-60s)
-├─ **NEW:** See ATS score
+├─ **Review category-by-category comparison**
+│  ├─ Score banner: Baseline → Current → Max
+│  ├─ Each category shows original vs. suggested
+│  ├─ Check/uncheck categories to approve/reject
+│  ├─ Use "Select All" or "Smart Accept" for batch
+│  └─ Professional Experience roles in accordion
+├─ Click "Generate Final CV" to merge approved changes
+├─ See ATS score
 │  ├─ ✅ 80+ = Green = Download confidently
 │  ├─ 🟠 60-79 = Amber = Review keywords
 │  └─ ❌ <60 = Red = ⚠️ WARNING - Consider editing
 ├─ Review matched/missing keywords
 ├─ (Optional) Edit CV, click "rescore edits"
-└─ Download PDF (CV + cover letter + email draft)
+└─ Download DOCX (CV + cover letter + email draft)
 ```
 
 ### Step 3: Track Your Application (30 sec)
@@ -228,17 +235,12 @@ aws dynamodb scan --table-name runbook --region "$AWS_REGION"
 
 ## 🔴 Common Issues & Fixes
 
-### "Ollama not running"
-**Fix:** Start Ollama in a separate terminal
-```bash
-ollama serve
-ollama pull mistral  # First time only
-```
+### "LLM not configured"
+**Fix:** Go to Settings tab → Add your LLM provider (OpenAI, Anthropic, or custom endpoint)
 
 ### "Cannot reach backend"
 **Fix:** Start backend in a separate terminal
 ```bash
-cd /Users/navinkumar/workrepos/pers-prj/careerops
 source venv/bin/activate
 python3 backend.py
 ```
@@ -381,14 +383,14 @@ Celebrate! 🎉
 ## 🔗 File Structure
 
 ```
-/Users/navinkumar/workrepos/pers-prj/careerops/
+careerops/
 ├── careerops.html          ← Open this in browser
-├── backend.py              ← Python server (handles DOCX, Ollama)
+├── backend.py              ← Python server (Flask API)
 ├── requirements.txt        ← pip install -r requirements.txt
 ├── SETUP.md               ← Full installation guide
 ├── FEATURES.md            ← What's implemented & roadmap
 ├── QUICK_REFERENCE.md     ← This file
-├── IMPLEMENTATION_SUMMARY.md ← What was built
+├── tests/                 ← pytest + Hypothesis test suite
 └── venv/                  ← Python virtual environment
 ```
 
@@ -405,7 +407,7 @@ Celebrate! 🎉
 ### Documentation Files
 - **SETUP.md** — Complete guide (troubleshooting, configuration)
 - **FEATURES.md** — What's implemented, what's coming
-- **IMPLEMENTATION_SUMMARY.md** — Technical details
+- **DOCKER_DEPLOYMENT.md** — Container deployment
 
 ---
 
@@ -413,12 +415,14 @@ Celebrate! 🎉
 
 - [ ] Read SETUP.md
 - [ ] Install requirements: `pip install -r requirements.txt`
-- [ ] Start Ollama: `ollama serve`
+- [ ] Set env vars: `AWS_REGION`, `CAREEROPS_ENCRYPTION_KEY`
 - [ ] Start backend: `python3 backend.py`
 - [ ] Start web server: `python3 -m http.server 8000`
 - [ ] Open browser: `http://localhost:8000/careerops.html`
+- [ ] Settings: Configure LLM provider
 - [ ] Tab 4: Upload/paste your CV
 - [ ] Tab 1: Paste a job description, generate CV
+- [ ] Review comparison, approve changes, generate final CV
 - [ ] Check ATS score (should be shown)
 - [ ] Tab 2: Log the application
 - [ ] Tab 3: Add a sample interview question
@@ -451,4 +455,4 @@ location.reload()
 
 **Happy job hunting! 🚀**
 
-*For detailed guides, see SETUP.md, FEATURES.md, and IMPLEMENTATION_SUMMARY.md*
+*For detailed guides, see SETUP.md and FEATURES.md*

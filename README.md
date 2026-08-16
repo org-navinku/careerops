@@ -1,554 +1,179 @@
-# CareerOps — Your Local Job Application Pipeline Manager
+# CareerOps — Job Application Pipeline Manager
 
-> A **zero-cloud, privacy-first** career management system that helps you tailor CVs, track applications, and ace interviews.
+A **privacy-first** career management system that helps you tailor CVs, track applications, and prep for interviews.
 
-## ⚡ Quick Start (5 min)
+## Quick Start
 
 ```bash
 # 1. Install dependencies
 pip install -r requirements.txt
 
-# 2. Start three terminals:
+# 2. Set required env vars
+export AWS_REGION=us-east-1
+export CAREEROPS_ENCRYPTION_KEY=$(python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
 
-# Terminal 1: Ollama (LLM for CV tailoring)
-ollama serve
-ollama pull mistral  # First time only
-
-# Terminal 2: Backend (handles DOCX, API)
+# 3. Start backend
 python3 backend.py
 
-# Terminal 3: Web server
+# 4. Start web server (separate terminal)
 python3 -m http.server 8000
 
-# 4. Open browser
-http://localhost:8000/careerops.html
+# 5. Open browser
+open http://localhost:8000/careerops.html
 ```
+
+LLM provider (OpenAI, Anthropic, or custom) is configured in the app's Settings tab.
 
 ---
 
-## 🎯 What It Does
+## What It Does
 
-### 1. Upload Your CV
-- **PDF** → Automatic text extraction ✓
-- **DOCX** → Automatic text extraction ✓
-- **Paste** → Manual copy-paste ✓
-
-### 2. Generate Tailored CVs
-Paste a job description → Get a CV tailored to match:
-- Keywords from the JD
-- Relevant experience reordered
+### Tab 1: Deploy — Generate Tailored CVs
+Paste a job description → get a CV tailored to match:
+- Keywords reordered and emphasized
+- ATS score with keyword analysis (target 80+)
+- **Category-by-category comparison** — approve/reject changes individually
 - Cover letter & email draft
-- **ATS score** with keyword analysis
+- DOCX export
 
-⚠️ **NEW:** Red warning if score < 80
+### Tab 2: Pipeline — Track Applications
+- Company, role, date, status tracking
+- ATS score and CV version per application
+- Follow-up date alerts
+- Email subject/to fields
 
-### 3. Track Your Applications
-Log every job you apply to:
-- Company, role, date applied, status
-- ATS score, CV version used
-- Follow-up dates (red alerts when due)
-- Personal notes
-
-### 4. Study from Interviews
-Record every interview question:
+### Tab 3: Runbook — Interview Questions
 - Question type (Technical, Behavioral, System Design, etc.)
-- Interview round (Phone Screen, Round 1, Round 2, Final)
-- Your answer & notes
-- **Outcome tracking** (Strong, Okay, Weak, Follow-up)
+- Round tracking (Phone Screen → Final)
+- Outcome tracking (Strong, Okay, Weak)
 - Filter by company to prep for next round
 
+### Tab 4: Base Profile — CV Management
+- Upload PDF/DOCX or paste text
+- Stored in S3 with version tracking
+- Every tailored CV is generated from this
+
 ---
 
-## 📊 Architecture
+## Architecture
 
 ```
-User Browser (Firefox/Chrome/Safari)
+Browser (careerops.html)
     │
-    ├─→ [HTML] careerops.html (1300 lines)
-    │   ├─ Tab 1: Deploy (CV generation UI)
-    │   ├─ Tab 2: Pipeline (application tracking)
-    │   ├─ Tab 3: Runbook (interview questions)
-    │   └─ Tab 4: Base Profile (CV management)
+    ├─→ localStorage (base CV, settings)
     │
-    ├─→ [localStorage] Browser-only preferences/profile drafts
-    │   ├─ base-cv (your master CV)
-    │   ├─ base-cv-timestamp (version tracking)
-    │   └─ llm-config (generation settings)
-    │
-    └─→ [Fetch API] ↓ HTTP calls
-         │
-         └─→ Backend: Flask on port 5000
-             │
-             ├─ POST /api/generate
-             │  └─→ Calls Ollama → Returns JSON (CV, cover, email, skills)
-             │
-             ├─ POST /api/extract-docx (NEW!)
-             │  └─→ Parses .docx file → Returns extracted text
-             │
-             ├─ /api/applications + /api/runbook
-             │  └─→ Stores pipeline and runbook data in DynamoDB
-             │
-             └─ GET /api/health
-                └─→ Checks Ollama status
-                    │
-                    └─→ Ollama (localhost:11434)
-                        └─→ LLM inference (Mistral or neural-chat)
+    └─→ Flask Backend (port 5001)
+         ├─ POST /api/generate        → LLM API (OpenAI/Anthropic/Custom)
+         ├─ POST /api/compare-cv      → CV parsing + category comparison
+         ├─ POST /api/assemble-cv     → Merge approved changes
+         ├─ POST /api/generate-docx   → Word document generation
+         ├─ POST /api/extract-docx    → DOCX text extraction
+         ├─ /api/applications         → DynamoDB CRUD
+         ├─ /api/runbook              → DynamoDB CRUD
+         └─ /api/health               → Status check
 ```
 
 ---
 
-## ✨ Key Features
-
-| Feature | Status | Details |
-|---------|--------|---------|
-| PDF Upload | ✅ Complete | Drag-drop, text extraction, pdf.js |
-| DOCX Upload | ✅ Complete | NEW! python-docx backend extraction |
-| CV Tailoring | ✅ Complete | LLM-powered, no fabrication |
-| ATS Scoring | ✅ Complete | Keyword matching, 80+ target |
-| ATS Warning | ✅ NEW | Red alert if score < 80 |
-| PDF Export | ✅ Complete | ATS-safe formatting, professional design |
-| Application Tracking | ✅ Complete | Status, follow-ups, version tracking |
-| Interview Runbook | ✅ Enhanced | Question types, outcomes, color badges |
-| Data Persistence | ✅ Complete | DynamoDB for application/runbook data |
-| Responsive UI | ✅ Complete | Desktop, tablet, mobile friendly |
-
----
-
-## 📁 Project Structure
+## Project Structure
 
 ```
 careerops/
-├── careerops.html              # Main app (open in browser)
-├── backend.py                  # Flask server (DOCX extraction, Ollama API)
-├── requirements.txt            # Python dependencies
-│
-├── SETUP.md                    # Installation guide (detailed)
-├── FEATURES.md                 # Feature status & roadmap
-├── QUICK_REFERENCE.md          # UI guide & pro tips
-├── IMPLEMENTATION_SUMMARY.md   # What was built & technical details
-├── README.md                   # This file
-│
-└── venv/                       # Python virtual environment
-    └── lib/python3.x/site-packages/
-        ├── flask
-        ├── flask_cors
-        ├── python-docx        # ← NEW: DOCX support
-        └── ...
+├── careerops.html          # Frontend (single-page app)
+├── backend.py              # Flask backend (all API logic)
+├── requirements.txt        # Python dependencies
+├── conftest.py             # pytest root config (mocks boto3)
+├── tests/                  # pytest + Hypothesis test suite
+├── Dockerfile              # Container build
+├── docker-compose.yml      # Local multi-service setup
+├── deploy-dynamodb.sh      # DynamoDB table creation script
+├── scripts/push-to-ecr.sh  # ECR deployment script
+├── .github/workflows/      # GitHub Actions CI
+├── .gitlab-ci.yml          # GitLab CI config
+├── SETUP.md                # Detailed installation guide
+├── FEATURES.md             # Feature status & roadmap
+├── QUICK_REFERENCE.md      # UI workflow guide
+├── DOCKER_DEPLOYMENT.md    # Container deployment guide
+└── RECORDING_FEATURE.md    # Interview recording feature docs
 ```
 
 ---
 
-## 🔧 Technology Stack
+## Technology Stack
 
-### Frontend
-- **HTML5 + CSS3 + Vanilla JavaScript** (no frameworks)
-- **localStorage API** — Browser-only profile/settings storage
-- **Fetch API** — Backend communication
-- **jsPDF** — PDF generation (professional CV export)
-- **pdf.js** — PDF text extraction
-
-### Backend
-- **Flask** — Lightweight Python web server
-- **Flask-CORS** — Cross-origin requests
-- **python-docx** — DOCX file parsing ✨ NEW!
-- **requests** — Ollama API calls
-- **boto3** — DynamoDB access
-
-### LLM
-- **Ollama** — Local LLM inference
-- **Mistral** — Default model (7B params, fast)
-- **neural-chat** — Faster alternative (3.5B params)
-
-### Data Storage
-- **AWS DynamoDB** — Fully managed storage for applications and runbook questions
-- **localStorage** — Browser storage for base CV and settings
+| Layer | Technologies |
+|-------|-------------|
+| Frontend | HTML5, Vanilla JS, CSS3, jsPDF, pdf.js |
+| Backend | Flask, Flask-CORS, python-docx, boto3, cryptography |
+| LLM | OpenAI, Anthropic, or any OpenAI-compatible API |
+| Storage | AWS DynamoDB (apps, runbook), S3 (CV files), localStorage |
+| Testing | pytest, Hypothesis (134 tests, property-based) |
+| Deploy | Docker, ECR, GitHub Actions, GitLab CI |
 
 ---
 
-## 📋 What's New (This Build)
+## Configuration
 
-### ✨ New Features Added
-1. **DOCX Upload Support** — Upload Word docs directly
-   - Backend: `/api/extract-docx` endpoint
-   - Frontend: `extractDocxText()` function
-   - Dependency: `python-docx` library
+### Environment Variables
 
-2. **ATS Warning Alert** — Red alert when score < 80
-   - Visual warning box below ATS score
-   - Explains risks and next steps
-   - Auto-dismisses if score improves
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `AWS_REGION` | Yes | AWS region for DynamoDB/S3 |
+| `CAREEROPS_ENCRYPTION_KEY` | Yes | Fernet key for encrypting API keys at rest |
+| `CAREEROPS_USERNAME` | No | Login username (if auth enabled) |
+| `CAREEROPS_PASSWORD` | No | Login password (if auth enabled) |
+| `OPENAI_API_KEY` | No | Fallback OpenAI key (prefer in-app Settings) |
+| `FLASK_PORT` | No | Backend port (default: 5001) |
+| `FLASK_HOST` | No | Backend host (default: 127.0.0.1) |
 
-3. **Enhanced Runbook** — Better interview question tracking
-   - Question type (Technical, Behavioral, System Design, Leadership, Other)
-   - Interview round (Phone Screen, Round 1, Round 2, Final)
-   - Outcome tracking (Strong, Okay, Weak, Follow-up)
-   - Color-coded badges (type + outcome)
-
-4. **CV Version Tracking** — Know which base profile was used
-   - Timestamp saved when profile updated
-   - Stored with each application
-   - Helps track profile evolution
-
-5. **Better UI/UX** — More informative, less surprises
-   - Error messages for failed uploads
-   - Field hints and tooltips
-   - Loading states with spinners
+LLM providers are configured in the app UI under Settings (keys encrypted at rest in DynamoDB).
 
 ---
 
-## 🚀 Installation
+## Testing
 
-### Prerequisites
-- **Python 3.8+**
-- **Ollama** (for AI tailoring) — [Download](https://ollama.ai)
-- **Modern browser** (Chrome 90+, Safari 14+, Firefox 88+, Edge 90+)
-
-### Step 1: Clone & Setup
 ```bash
-cd /Users/navinkumar/workrepos/pers-prj/careerops
+# Run all tests
+python3 -m pytest tests/ -q
 
-# Create and activate virtual environment
-python3 -m venv venv
-source venv/bin/activate
+# Run with verbose output
+python3 -m pytest tests/ -v
 
-# Install dependencies
-pip install -r requirements.txt
+# Run specific test file
+python3 -m pytest tests/test_cv_comparison_api.py -v
 ```
 
-### Step 2: Start Services (3 terminals)
-
-**Terminal 1: Ollama**
-```bash
-ollama serve
-
-# First time only:
-ollama pull mistral
-```
-
-**Terminal 2: Backend**
-```bash
-cd /Users/navinkumar/workrepos/pers-prj/careerops
-source venv/bin/activate
-python3 backend.py
-
-# Expected output:
-# 🚀 Backend running on http://localhost:5000
-# ✓ Health check: http://localhost:5000/api/health
-```
-
-**Terminal 3: Web Server**
-```bash
-cd /Users/navinkumar/workrepos/pers-prj/careerops
-python3 -m http.server 8000
-
-# Expected output:
-# Serving HTTP on 0.0.0.0 port 8000
-```
-
-### Step 3: Open Browser
-```
-http://localhost:8000/careerops.html
-```
+134 tests covering:
+- CV parsing (property-based + unit)
+- Comparison engine (property-based + unit)
+- Final assembler (property-based + unit)
+- Score computation (property-based)
+- API endpoints (integration)
+- Frontend logic (property-based)
+- Email fields, CV upload/download/delete
 
 ---
 
-## 📖 Documentation
+## Docker
+
+```bash
+# Build and run locally
+docker-compose up --build
+
+# Push to ECR
+./scripts/push-to-ecr.sh
+```
+
+See [DOCKER_DEPLOYMENT.md](DOCKER_DEPLOYMENT.md) for full deployment guide.
+
+---
+
+## Documentation
 
 | Document | Purpose |
 |----------|---------|
-| **SETUP.md** | Installation, troubleshooting, detailed guide |
-| **FEATURES.md** | What's implemented, roadmap, testing checklist |
-| **QUICK_REFERENCE.md** | UI guide, shortcuts, pro tips, workflows |
-| **IMPLEMENTATION_SUMMARY.md** | Technical details, what was built, file structure |
-| **README.md** | This file (overview) |
-
----
-
-## 💡 Usage Examples
-
-### Example 1: Generate Tailored CV
-```
-1. Tab 4 → Upload your CV (PDF/DOCX/paste)
-2. Save base profile
-3. Tab 1 → Paste job description from LinkedIn
-4. Click "Generate application package"
-5. Wait 30-60 sec (LLM processing)
-6. See ATS score:
-   - ✅ 80+? Download and apply confidently
-   - 🟠 60-79? Review missing keywords
-   - ❌ <80? ⚠️ See warning, consider editing
-7. Download PDF → Apply
-8. Click "Log this application →"
-```
-
-### Example 2: Track Applications
-```
-1. Tab 2 → View pipeline (auto-populated after logging)
-2. Click "Applied" status → Change to "Screening"
-3. Add follow-up date (e.g., 2024-01-22)
-4. Add note: "Good fit, mentioned 10 years experience"
-5. Auto-saves when you blur the field
-6. Stats update automatically
-```
-
-### Example 3: Prep for Interview Round 2
-```
-1. Tab 3 → Filter by company name
-2. See all questions from Round 1:
-   - "Tell me about a conflict" [Behavioral] [Strong]
-   - "Design a URL shortener" [System Design] [Okay]
-3. Review answers and notes
-4. Spot patterns (they like system design questions)
-5. Practice similar questions before Round 2
-```
-
----
-
-## ⚙️ Configuration
-
-### Environment Variables
-```bash
-# Optional: Set before running backend.py
-export OLLAMA_BASE=http://localhost:11434  # Ollama server URL
-export OLLAMA_MODEL=mistral                # LLM model to use
-
-python3 backend.py
-```
-
-### Switch to Faster Model
-```bash
-# Pull neural-chat (3.5B, faster than mistral)
-ollama pull neural-chat
-
-# Use it:
-export OLLAMA_MODEL=neural-chat
-python3 backend.py
-```
-
-### Port Configuration
-- **Frontend:** http://localhost:8000 (configurable via `python3 -m http.server PORT`)
-- **Backend:** http://localhost:5000 (hardcoded in backend.py)
-- **Ollama:** http://localhost:11434 (configurable via `OLLAMA_BASE` env var)
-
----
-
-## 🧪 Testing
-
-### Health Check
-```bash
-# Check if everything is running:
-curl http://localhost:5000/api/health
-
-# Expected response:
-# {"status": "ok", "ollama": "connected", "model": "mistral", "docx_support": true}
-```
-
-### Test DOCX Extraction
-```javascript
-// In browser console (F12):
-const formData = new FormData();
-formData.append('file', fileInput.files[0]); // Your DOCX file
-
-fetch('http://localhost:5000/api/extract-docx', {
-  method: 'POST',
-  body: formData
-})
-.then(r => r.json())
-.then(console.log);
-```
-
-### Test Data Persistence
-```bash
-curl 'http://localhost:5001/api/applications?userId=default-user'
-curl 'http://localhost:5001/api/runbook?userId=default-user'
-```
-
----
-
-## 🐛 Troubleshooting
-
-### "Ollama not running"
-```bash
-# In Terminal 1:
-ollama serve
-
-# First time only:
-ollama pull mistral
-```
-
-### "Cannot reach backend"
-```bash
-# Check if port 5000 is in use:
-lsof -i :5000
-
-# Make sure backend is running:
-cd /Users/navinkumar/workrepos/pers-prj/careerops
-source venv/bin/activate
-python3 backend.py
-```
-
-### "DOCX upload fails"
-Try these in order:
-1. Re-save the DOCX in Word/Google Docs
-2. Copy text manually and paste
-3. Export DOCX as PDF, upload PDF instead
-
-### "Data not saving"
-- Confirm the backend is running on port 5001
-- Confirm `deploy-dynamodb.sh` has created the `applications` and `runbook` tables
-- Check `/api/health` and verify the `dynamodb` field is `connected`
-- Confirm `AWS_REGION` and AWS credentials are available to the backend
-
----
-
-## 📊 Data Schema
-
-### Applications (`applications` DynamoDB table)
-```json
-{
-  "id": "unique-id",
-  "company": "Acme Corp",
-  "role": "Senior Engineer",
-  "jd": "full job description text",
-  "dateApplied": "2024-01-15",
-  "status": "Applied|Screening|Interview|Offer|Rejected|Ghosted",
-  "followUpDate": "2024-01-22",
-  "notes": "Good culture fit",
-  "tailoredCV": "markdown CV text",
-  "coverLetter": "cover letter text",
-  "emailDraft": "email draft text",
-  "skills": ["Kubernetes", "Terraform", "AWS"],
-  "atsScore": 85,
-  "baseCvVersion": "2024-01-15T10:30:00Z"
-}
-```
-
-### Interview Questions (localStorage: `runbook`)
-```json
-{
-  "Acme Corp — Senior Engineer": [
-    {
-      "id": "unique-id",
-      "question": "How do you handle production outages?",
-      "type": "behavioral|technical|systemdesign|leadership|other",
-      "round": "Phone Screen|Round 1|Round 2|Final",
-      "outcome": "strong|okay|weak|follow-up",
-      "notes": "Focused on communication and RCA",
-      "date": "2024-01-18"
-    }
-  ]
-}
-```
-
----
-
-## 🗺️ Roadmap (Phase 2)
-
-- [ ] CSV/JSON export of applications and questions
-- [ ] Analytics dashboard (success rate, time-to-offer, trends)
-- [ ] Bulk actions (mark multiple as rejected)
-- [ ] Email templates with auto-fill
-- [ ] Interview prep checklist (links to runbook)
-- [ ] Question statistics (common patterns, outcomes)
-- [ ] Optional cloud backup (encrypted)
-
----
-
-## 🔒 Privacy & Data
-
-- ✅ **100% Local** — All data in browser's localStorage
-- ✅ **No Cloud** — Nothing sent to external servers (except Ollama API calls)
-- ✅ **No Tracking** — No analytics, no cookies
-- ✅ **Exportable** — Can backup/import JSON anytime
-- ✅ **Deletable** — `localStorage.clear()` in console to wipe everything
-
----
-
-## ⚡ Performance
-
-### First Run
-- Backend startup: ~2s
-- Ollama model load: 5-10s (first time only)
-- First CV generation: 30-60s
-
-### Subsequent Runs
-- CV generation: 15-30s
-- ATS scoring: <1s
-- PDF export: <2s
-- UI renders: <100ms
-
-### Memory
-- Browser: ~50MB (grows with large application logs)
-- Backend: ~100MB
-- Ollama: 1-2GB (depends on model size)
-
----
-
-## 🤝 Contributing
-
-This is a personal project. To add features:
-1. Edit `careerops.html` (frontend)
-2. Edit `backend.py` (backend)
-3. Test locally
-4. Keep data models backwards-compatible
-
----
-
-## ✅ Quick Checklist: First Time
-
-- [ ] Read SETUP.md
-- [ ] Install requirements: `pip install -r requirements.txt`
-- [ ] Start Ollama: `ollama serve`
-- [ ] Start backend: `python3 backend.py`
-- [ ] Start web server: `python3 -m http.server 8000`
-- [ ] Open: `http://localhost:8000/careerops.html`
-- [ ] Tab 4: Upload/paste CV
-- [ ] Tab 1: Paste JD, generate CV
-- [ ] Tab 2: Log application
-- [ ] Tab 3: Add interview question
-- [ ] Refresh: Data persists ✓
-
----
-
-## 📞 Support
-
-### Debug
-```javascript
-// In browser console (F12):
-console.log(localStorage);
-fetch('http://localhost:5000/api/health').then(r=>r.json()).then(console.log);
-```
-
-### Export Data (Backup)
-```bash
-aws dynamodb scan --table-name applications --region "$AWS_REGION"
-aws dynamodb scan --table-name runbook --region "$AWS_REGION"
-```
-
-### Clear Data (Fresh Start)
-```javascript
-localStorage.clear();
-location.reload();
-```
-
----
-
-## 📜 License
-
-Personal project. Use as-is.
-
----
-
-## 🎉 Happy Job Hunting!
-
-**Start here:**
-1. Read [SETUP.md](SETUP.md) for installation
-2. Use [QUICK_REFERENCE.md](QUICK_REFERENCE.md) for UI guide
-3. Check [FEATURES.md](FEATURES.md) for what's implemented
-
-**Have questions?** Check console (F12) for error messages, or review the docs above.
-
----
-
-*Last updated: 2024-01-28*  
-*Built with: Flask + Ollama + Vanilla JS + localStorage*
+| [SETUP.md](SETUP.md) | Detailed installation & troubleshooting |
+| [FEATURES.md](FEATURES.md) | Feature status & roadmap |
+| [QUICK_REFERENCE.md](QUICK_REFERENCE.md) | UI workflows & tips |
+| [DOCKER_DEPLOYMENT.md](DOCKER_DEPLOYMENT.md) | Container deployment |
+| [RECORDING_FEATURE.md](RECORDING_FEATURE.md) | Interview recording feature |

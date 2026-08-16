@@ -438,7 +438,6 @@ Open DevTools (F12) -> Console to look for browser error messages.
 
 ## 📖 Learn More
 
-- **Getting Started:** [START_HERE.md](START_HERE.md)
 - **Full Setup:** [SETUP.md](SETUP.md)
 - **Quick Reference:** [QUICK_REFERENCE.md](QUICK_REFERENCE.md)
 - **All Features:** [FEATURES.md](FEATURES.md)
