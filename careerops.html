@@ -1850,23 +1850,25 @@ document.getElementById('saveFromParsedBtn').addEventListener('click', async ()=
 
   // Build Professional Experience section from edited roles
   // Use pipe-separated format that parseBaseCv expects: "Title | Company | Location (Dates)"
+  // Add blank lines between roles to ensure proper separation during re-parsing
   if(editedRoles.length > 0) {
-    reconstructed += `## Professional Experience\n\n`;
-    editedRoles.forEach(role => {
+    reconstructed += `## Professional Experience\n`;
+    editedRoles.forEach((role, idx) => {
       if(role.title || role.company) {
+        reconstructed += `\n`; // Blank line before each role for proper separation
         // Format: Title | Company | Location (Dates)
         const roleLine = `${role.title || 'Role'} | ${role.company || 'Company'}${role.location ? ' | ' + role.location : ''}${role.dates ? ' (' + role.dates + ')' : ''}`;
-        reconstructed += `${roleLine}\n\n`;
+        reconstructed += `${roleLine}\n`;
 
         if(role.bullets && role.bullets.length) {
+          reconstructed += `\n`; // Blank line before bullets
           role.bullets.forEach(bullet => {
             reconstructed += `- ${bullet}\n`;
           });
-          reconstructed += `\n`;
         }
       }
     });
-    reconstructed += `\n`;
+    reconstructed += `\n\n`;
   }
 
   if(educationText) reconstructed += `## Education\n${educationText}\n\n`;
@@ -1955,7 +1957,7 @@ function parseBaseCv(raw){
   const contactSet = new Set();
   const addContact = v => { if(!contactSet.has(v)){ contactSet.add(v); contactParts.push(v); } };
   // Only collect contact from lines BEFORE the first section header
-  const firstSectionIdx = lines.findIndex(l => /^(SUMMARY|PROFESSIONAL SUMMARY|CERTIFICATIONS|PROFESSIONAL EXPERIENCE|EDUCATION|KEY SKILLS|CORE SKILLS|CORE TECHNICAL SKILLS|VOLUNTEER|COMMUNITY|COMMUNITY LEADERSHIP|LANGUAGES)/i.test(l));
+  const firstSectionIdx = lines.findIndex(l => /^(SUMMARY|PROFESSIONAL SUMMARY|CERTIFICATIONS|PROFESSIONAL EXPERIENCE|WORK EXPERIENCE|RELEVANT EXPERIENCE|EMPLOYMENT HISTORY|WORK HISTORY|EMPLOYMENT|EXPERIENCE|EDUCATION|KEY SKILLS|CORE SKILLS|CORE TECHNICAL SKILLS|VOLUNTEER|COMMUNITY|COMMUNITY LEADERSHIP|LANGUAGES)/i.test(l));
   const preambleLines = firstSectionIdx >= 0 ? lines.slice(0, firstSectionIdx) : lines.slice(0, 15);
   for(const l of preambleLines){
     // Split pipe-separated lines and check each token individually
@@ -1997,12 +1999,18 @@ function parseBaseCv(raw){
   }
 
   // --- split into named sections by ALL-CAPS headers or known keywords
-  const sectionRe = /^(SUMMARY|PROFESSIONAL SUMMARY|CERTIFICATIONS|PROFESSIONAL EXPERIENCE|EDUCATION|KEY SKILLS|CORE SKILLS|CORE TECHNICAL SKILLS|VOLUNTEER|COMMUNITY|COMMUNITY LEADERSHIP|LANGUAGES)/i;
+  const sectionRe = /^(SUMMARY|PROFESSIONAL SUMMARY|CERTIFICATIONS|PROFESSIONAL EXPERIENCE|WORK EXPERIENCE|RELEVANT EXPERIENCE|EMPLOYMENT HISTORY|WORK HISTORY|EMPLOYMENT|EXPERIENCE|EDUCATION|KEY SKILLS|CORE SKILLS|CORE TECHNICAL SKILLS|VOLUNTEER|COMMUNITY|COMMUNITY LEADERSHIP|LANGUAGES)/i;
+  // Any of these header variants map to the canonical PROFESSIONAL EXPERIENCE section
+  const experienceHeaderRe = /^(PROFESSIONAL EXPERIENCE|WORK EXPERIENCE|RELEVANT EXPERIENCE|EMPLOYMENT HISTORY|WORK HISTORY|EMPLOYMENT|EXPERIENCE)$/i;
   const rawSections = {};
   let curSection = 'PREAMBLE';
   for(const l of lines){
     const m = l.match(sectionRe);
-    if(m){ curSection = m[1].toUpperCase(); rawSections[curSection] = rawSections[curSection] || []; continue; }
+    if(m){
+      curSection = experienceHeaderRe.test(m[1]) ? 'PROFESSIONAL EXPERIENCE' : m[1].toUpperCase();
+      rawSections[curSection] = rawSections[curSection] || [];
+      continue;
+    }
     if(!rawSections[curSection]) rawSections[curSection] = [];
     rawSections[curSection].push(l);
   }
@@ -2070,7 +2078,8 @@ function parseBaseCv(raw){
 
     // Check if this line contains pipe separators indicating a combined role+company+location line
     // Format: "Title | Company | Location (Dates)" or "Title | Company | Dates"
-    if(l.includes('|') && !role?.title){
+    // This marks the start of a new role, so flush any existing role first
+    if(l.includes('|') && /^[A-Z]/.test(l) && l.split('|').length >= 2){
       flushRole();
       const parts = l.split('|').map(p => p.trim());
       const titlePart = parts[0]; // "Senior DevOps Engineer"
